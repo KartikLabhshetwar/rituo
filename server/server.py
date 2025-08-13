@@ -62,7 +62,7 @@ class CORSEnabledFastMCP(FastMCP):
         async def startup_event():
             await connect_to_mongo()
             # Initialize MCP client
-            from mcp_client import initialize_mcp_client
+            from services.mcp_client import initialize_mcp_client
             await initialize_mcp_client()
             # Include API routes
             from api.auth_routes import router as auth_router
@@ -76,7 +76,7 @@ class CORSEnabledFastMCP(FastMCP):
         async def shutdown_event():
             await close_mongo_connection()
             # Cleanup MCP client
-            from mcp_client import cleanup_mcp_client
+            from services.mcp_client import cleanup_mcp_client
             await cleanup_mcp_client()
         
         # Add session middleware first (to set context before other middleware)
@@ -214,6 +214,33 @@ async def oauth2_callback(request: Request) -> HTMLResponse:
     except Exception as e:
         logger.error(f"Error processing OAuth callback: {str(e)}", exc_info=True)
         return create_server_error_response(str(e))
+
+# --- Import and register all tools ---
+# Import all tool modules to register their @server.tool() decorated functions
+try:
+    import gmail.gmail_tools
+    logger.info("Loaded Gmail tools")
+except ImportError as e:
+    logger.warning(f"Failed to load Gmail tools: {e}")
+
+try:
+    import gcalendar.calendar_tools
+    logger.info("Loaded Google Calendar tools")
+except ImportError as e:
+    logger.warning(f"Failed to load Google Calendar tools: {e}")
+
+try:
+    import gtasks.tasks_tools
+    logger.info("Loaded Google Tasks tools")
+except ImportError as e:
+    logger.warning(f"Failed to load Google Tasks tools: {e}")
+
+try:
+    from core.comments import register_comment_tools
+    register_comment_tools()
+    logger.info("Loaded comment tools")
+except ImportError as e:
+    logger.warning(f"Failed to load comment tools: {e}")
 
 # --- Tools ---
 @server.tool()

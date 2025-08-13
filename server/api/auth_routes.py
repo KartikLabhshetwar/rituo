@@ -2,6 +2,7 @@
 Authentication API routes for frontend
 """
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Dict, Any
 from fastapi import APIRouter, HTTPException, status, Depends
@@ -17,7 +18,9 @@ router = APIRouter(prefix="/api/auth", tags=["authentication"])
 
 class GoogleAuthRequest(BaseModel):
     """Google OAuth token request"""
-    token: str
+    token: str = None
+    authorization_code: str = None
+    state: str = None
 
 class AuthResponse(BaseModel):
     """Authentication response"""
@@ -33,16 +36,28 @@ class RefreshTokenRequest(BaseModel):
 @router.post("/google", response_model=AuthResponse)
 async def google_auth(request: GoogleAuthRequest):
     """
-    Authenticate user with Google OAuth token
+    Authenticate user with Google OAuth token or authorization code
     """
     logger.info("=== Google Auth Request Started ===")
-    logger.info(f"Received token (first 50 chars): {request.token[:50]}...")
     
     try:
-        # Verify Google token and get user info
-        logger.info("Verifying Google token...")
-        google_user_info = await auth_service.verify_google_token(request.token)
-        logger.info(f"Google token verified successfully for user: {google_user_info.get('email')}")
+        google_user_info = None
+        
+        # Handle both JWT token and authorization code flows
+        if request.token:
+            logger.info(f"Processing JWT token (first 50 chars): {request.token[:50]}...")
+            google_user_info = await auth_service.verify_google_token(request.token)
+        elif request.authorization_code:
+            logger.info(f"Processing authorization code: {request.authorization_code[:20]}...")
+            # Exchange authorization code for user info
+            google_user_info = await auth_service.exchange_auth_code(request.authorization_code)
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Either token or authorization_code must be provided"
+            )
+        
+        logger.info(f"Google auth verified successfully for user: {google_user_info.get('email')}")
         logger.info(f"Google user info: {google_user_info}")
         
         # Get or create user in database
@@ -142,6 +157,22 @@ async def logout():
         content={"message": "Successfully logged out"},
         status_code=status.HTTP_200_OK
     )
+
+@router.get("/google-config")
+async def get_google_config():
+    """
+    Get Google OAuth client configuration for frontend
+    """
+    client_id = os.getenv("GOOGLE_OAUTH_CLIENT_ID")
+    if not client_id:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Google OAuth client ID not configured"
+        )
+    
+    return {
+        "client_id": client_id
+    }
 
 @router.get("/check")
 async def check_auth_status(current_user: User = Depends(get_optional_user)):

@@ -37,7 +37,7 @@ export default function ChatTest() {
   const [accessToken, setAccessToken] = useState<string | null>(null)
   const router = useRouter()
 
-  // Check authentication on mount
+  // Check authentication and create chat session on mount
   useEffect(() => {
     const token = localStorage.getItem('access_token')
     const userData = localStorage.getItem('user')
@@ -50,8 +50,39 @@ export default function ChatTest() {
     
     setAccessToken(token)
     setUser(JSON.parse(userData))
-    setChatId(`chat_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`)
+    
+    // Create a new chat session
+    createChatSession(token)
   }, [router])
+
+  const createChatSession = async (token: string) => {
+    try {
+      const response = await fetch('http://localhost:8000/api/chats/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          title: 'New Chat'
+        })
+      })
+
+      if (response.ok) {
+        const chatSession = await response.json()
+        setChatId(chatSession.id)
+        console.log('Chat session created:', chatSession.id)
+      } else {
+        // Fallback to generated ID if API fails
+        setChatId(`chat_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`)
+        console.warn('Failed to create chat session, using fallback ID')
+      }
+    } catch (error) {
+      // Fallback to generated ID if API fails
+      setChatId(`chat_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`)
+      console.warn('Error creating chat session, using fallback ID:', error)
+    }
+  }
 
   const sendMessage = async () => {
     if (!input.trim() || isLoading) return

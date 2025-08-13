@@ -6,22 +6,6 @@ from typing import List, Optional, Any, Dict
 from pydantic import BaseModel, Field, EmailStr
 from bson import ObjectId
 
-class PyObjectId(ObjectId):
-    @classmethod
-    def __get_validators__(cls):
-        yield cls.validate
-
-    @classmethod
-    def validate(cls, v):
-        if not ObjectId.is_valid(v):
-            raise ValueError("Invalid ObjectId")
-        return ObjectId(v)
-
-    @classmethod
-    def __get_pydantic_json_schema__(cls, field_schema):
-        field_schema.update(type="string")
-        return field_schema
-
 class ChatMessage(BaseModel):
     """Individual chat message model"""
     id: str = Field(default_factory=lambda: str(ObjectId()))
@@ -37,8 +21,8 @@ class ChatMessage(BaseModel):
 
 class ChatSession(BaseModel):
     """Chat session model"""
-    id: PyObjectId = Field(default_factory=PyObjectId, alias="_id")
-    user_id: PyObjectId = Field(..., description="Reference to user")
+    id: str = Field(default_factory=lambda: str(ObjectId()), alias="_id")
+    user_id: str = Field(..., description="Reference to user")
     title: str = Field(default="New Chat", description="Chat session title")
     messages: List[ChatMessage] = Field(default_factory=list, description="Chat messages")
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -53,7 +37,7 @@ class ChatSession(BaseModel):
 
 class User(BaseModel):
     """User model for MongoDB"""
-    id: PyObjectId = Field(default_factory=PyObjectId, alias="_id")
+    id: str = Field(default_factory=lambda: str(ObjectId()), alias="_id")
     email: EmailStr = Field(..., description="User email address")
     google_id: str = Field(..., description="Google OAuth ID")
     name: str = Field(..., description="User full name")

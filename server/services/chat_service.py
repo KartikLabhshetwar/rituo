@@ -24,7 +24,7 @@ class ChatService:
             db = get_database()
             
             chat_data = {
-                "user_id": ObjectId(user_id),
+                "user_id": user_id,  # Keep as string, don't convert to ObjectId
                 "title": title,
                 "messages": [],
                 "created_at": datetime.now(timezone.utc),
@@ -34,7 +34,7 @@ class ChatService:
             }
             
             result = await db.chat_sessions.insert_one(chat_data)
-            chat_data["_id"] = result.inserted_id
+            chat_data["_id"] = str(result.inserted_id)  # Convert ObjectId to string
             
             logger.info(f"Created new chat session for user {user_id}: {result.inserted_id}")
             return ChatSession(**chat_data)
@@ -51,8 +51,15 @@ class ChatService:
         try:
             db = get_database()
             
+            # Query both string and ObjectId formats for backward compatibility
             cursor = db.chat_sessions.find(
-                {"user_id": ObjectId(user_id), "is_active": True}
+                {
+                    "$or": [
+                        {"user_id": user_id},  # String format (new)
+                        {"user_id": ObjectId(user_id)}  # ObjectId format (legacy)
+                    ],
+                    "is_active": True
+                }
             ).sort("updated_at", -1).limit(limit)
             
             sessions = []
@@ -82,7 +89,10 @@ class ChatService:
             
             session_data = await db.chat_sessions.find_one({
                 "_id": ObjectId(session_id),
-                "user_id": ObjectId(user_id),
+                "$or": [
+                    {"user_id": user_id},  # String format (new)
+                    {"user_id": ObjectId(user_id)}  # ObjectId format (legacy)
+                ],
                 "is_active": True
             })
             
@@ -119,7 +129,10 @@ class ChatService:
             # Verify session exists and belongs to user
             session = await db.chat_sessions.find_one({
                 "_id": ObjectId(session_id),
-                "user_id": ObjectId(user_id),
+                "$or": [
+                    {"user_id": user_id},  # String format (new)
+                    {"user_id": ObjectId(user_id)}  # ObjectId format (legacy)
+                ],
                 "is_active": True
             })
             
@@ -166,7 +179,10 @@ class ChatService:
             result = await db.chat_sessions.update_one(
                 {
                     "_id": ObjectId(session_id),
-                    "user_id": ObjectId(user_id),
+                    "$or": [
+                        {"user_id": user_id},  # String format (new)
+                        {"user_id": ObjectId(user_id)}  # ObjectId format (legacy)
+                    ],
                     "is_active": True
                 },
                 {
@@ -203,7 +219,10 @@ class ChatService:
             result = await db.chat_sessions.update_one(
                 {
                     "_id": ObjectId(session_id),
-                    "user_id": ObjectId(user_id)
+                    "$or": [
+                        {"user_id": user_id},  # String format (new)
+                        {"user_id": ObjectId(user_id)}  # ObjectId format (legacy)
+                    ]
                 },
                 {
                     "$set": {

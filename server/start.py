@@ -24,14 +24,22 @@ def start_services():
         # Start MCP server on port 8001
         print("📡 Starting MCP Server on port 8001...")
         mcp_process = subprocess.Popen([
-            "uv", "run", "python", "main.py",
-            "--transport", "streamable-http",
-            "--tools", "gmail", "calendar", "tasks"
+            "uv", "run", "python", "main.py"
         ], env={**os.environ, "PORT": "8001"})
         processes.append(("MCP Server", mcp_process))
         
         # Wait a moment for MCP server to start
-        time.sleep(2)
+        print("   Waiting for MCP server to initialize...")
+        time.sleep(5)
+        
+        # Check if MCP server started successfully
+        if mcp_process.poll() is not None:
+            print(f"❌ MCP Server failed to start!")
+            print(f"   Exit code: {mcp_process.returncode}")
+            print("   Check the logs above for more details")
+            raise Exception("MCP Server startup failed")
+        else:
+            print("✅ MCP Server appears to be running")
         
         # Start FastAPI app on port 8000
         print("🌐 Starting FastAPI App on port 8000...")

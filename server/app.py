@@ -22,7 +22,7 @@ from api.chat_routes import router as chat_router
 from api.ai_routes import router as ai_router
 
 # Import MCP client for AI service
-from mcp_client import initialize_mcp_client, cleanup_mcp_client
+from services.mcp_client import initialize_mcp_client, cleanup_mcp_client
 
 # Configure logging
 logging.basicConfig(

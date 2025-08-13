@@ -1,15 +1,22 @@
 "use client"
 
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { useRouter } from 'next/navigation'
+
+interface GoogleConfig {
+  client_id: string;
+  callback: (response: { credential: string }) => void;
+  auto_select: boolean;
+  cancel_on_tap_outside: boolean;
+}
 
 declare global {
   interface Window {
     google: {
       accounts: {
         id: {
-          initialize: (config: any) => void
+          initialize: (config: GoogleConfig) => void
           prompt: () => void
         }
       }
@@ -20,59 +27,43 @@ declare global {
 export default function Login() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
+  const [clientId, setClientId] = useState('')
   const router = useRouter()
 
-  const initializeGoogleSignIn = () => {
-    console.log('=== Initializing Google Sign-In ===')
-    console.log('Checking if window.google is available:', !!window.google)
-    
-    if (window.google) {
-      console.log('Initializing Google Identity Services...')
+  useEffect(() => {
+    // Get client ID from backend
+    const fetchClientId = async () => {
       try {
-        window.google.accounts.id.initialize({
-          client_id: '190623858377-ofj6om63igqeta8e7qo98l3jk39gv37h.apps.googleusercontent.com',
-          callback: handleGoogleSignIn,
-          auto_select: false,
-          cancel_on_tap_outside: false,
-        })
-        console.log('Google Identity Services initialized successfully')
+        const response = await fetch('http://localhost:8000/api/auth/google-config')
+        if (response.ok) {
+          const data = await response.json()
+          setClientId(data.client_id)
+        } else {
+          throw new Error('Failed to fetch Google client configuration')
+        }
       } catch (error) {
-        console.error('Error initializing Google Identity Services:', error)
-        setError('Failed to initialize Google Sign-In. Please refresh the page and try again.')
+        console.error('Error fetching Google client config:', error)
+        setError('Failed to load Google authentication configuration')
       }
-    } else {
-      console.error('window.google is not available')
-      setError('Google Sign-In not available. Please refresh the page and try again.')
     }
-  }
+
+    fetchClientId()
+  }, [])
+
+  // Remove Google Identity Services initialization - we'll use direct OAuth redirect
+  const initializeGoogleSignIn = React.useCallback(() => {
+    console.log('=== OAuth Login Ready ===')
+    console.log('Client ID loaded:', !!clientId)
+    // No need to initialize Google Identity Services, we'll redirect directly
+  }, [clientId])
 
   useEffect(() => {
-    console.log('=== Login Component Mounted ===')
-    console.log('Loading Google Identity Services script...')
-    
-    // Load Google Identity Services
-    const script = document.createElement('script')
-    script.src = 'https://accounts.google.com/gsi/client'
-    script.async = true
-    script.onload = () => {
-      console.log('Google Identity Services script loaded successfully')
+    if (clientId) {
+      console.log('=== Login Component Ready ===')
+      console.log('Client ID loaded, OAuth ready')
       initializeGoogleSignIn()
     }
-    script.onerror = () => {
-      console.error('Failed to load Google Identity Services script')
-      setError('Failed to load Google Sign-In. Please refresh the page.')
-    }
-    document.body.appendChild(script)
-
-    return () => {
-      console.log('Cleaning up Google Identity Services script')
-      try {
-        document.body.removeChild(script)
-      } catch (e) {
-        console.warn('Error removing script:', e)
-      }
-    }
-  }, [])  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [clientId, initializeGoogleSignIn])
 
   const handleGoogleSignIn = async (response: { credential: string }) => {
     console.log('=== Google Sign-In Callback Triggered ===')
@@ -150,12 +141,11 @@ export default function Login() {
       console.log('Redirecting to chat page...')
       router.push('/chat')
 
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('=== Login Error ===')
       console.error('Error details:', error)
-      console.error('Error message:', error.message)
-      console.error('Error stack:', error.stack)
-      setError(`Login failed: ${error.message}`)
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred'
+      setError(`Login failed: ${errorMessage}`)
     } finally {
       setIsLoading(false)
       console.log('=== Google Sign-In Process Completed ===')
@@ -164,21 +154,38 @@ export default function Login() {
 
   const handleGoogleLogin = () => {
     console.log('=== Manual Google Login Button Clicked ===')
-    console.log('Checking if window.google is available:', !!window.google)
+    console.log('Client ID:', clientId)
     
-    if (window.google) {
-      console.log('Triggering Google prompt...')
-      try {
-        window.google.accounts.id.prompt()
-        console.log('Google prompt triggered successfully')
-      } catch (error) {
-        console.error('Error triggering Google prompt:', error)
-        setError('Failed to show Google Sign-In. Please refresh the page.')
-      }
-    } else {
-      console.error('Google Sign-In not loaded')
-      setError('Google Sign-In not loaded. Please refresh the page.')
+    if (!clientId) {
+      setError('Google client configuration not loaded')
+      return
     }
+
+    // Direct redirect to Google OAuth instead of using Google Identity Services
+    const redirectUri = 'http://localhost:8001/oauth2callback'
+    const scope = 'openid email profile https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/tasks'
+    
+    const oauthUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+      `client_id=${encodeURIComponent(clientId)}&` +
+      `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+      `response_type=code&` +
+      `scope=${encodeURIComponent(scope)}&` +
+      `access_type=offline&` +
+      `prompt=consent`
+    
+    console.log('Redirecting to OAuth URL:', oauthUrl)
+    window.location.href = oauthUrl
+  }
+
+  if (!clientId) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100">
+        <div className="max-w-md w-full space-y-8 p-8 text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto"></div>
+          <p className="text-gray-600">Loading authentication...</p>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -207,7 +214,7 @@ export default function Login() {
 
             <Button
               onClick={handleGoogleLogin}
-              disabled={isLoading}
+              disabled={isLoading || !clientId}
               className="w-full flex items-center justify-center gap-3 bg-white hover:bg-gray-50 text-gray-900 border border-gray-300"
               size="lg"
             >

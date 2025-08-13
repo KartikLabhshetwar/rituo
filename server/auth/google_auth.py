@@ -342,7 +342,11 @@ def check_client_secrets() -> Optional[str]:
         An error message string if secrets are not found, otherwise None.
     """
     env_config = load_client_secrets_from_env()
-    if not env_config and not os.path.exists(CONFIG_CLIENT_SECRETS_PATH):
+    if env_config:
+        # Environment variables are present, no need to check file
+        return None
+    
+    if not os.path.exists(CONFIG_CLIENT_SECRETS_PATH):
         logger.error(
             f"OAuth client credentials not found. No environment variables set and no file at {CONFIG_CLIENT_SECRETS_PATH}"
         )
