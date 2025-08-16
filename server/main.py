@@ -36,7 +36,7 @@ def main():
         logger.info("Starting MCP Server...")
         
         # Run the server
-        server.run(transport=transport, port=port)
+        server.run(transport=transport, port=port, host="127.0.0.1")
         
     except ImportError as e:
         logger.error(f"Import error: {e}")

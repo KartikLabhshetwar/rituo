@@ -442,7 +442,7 @@ Current conversation context will be provided with each message."""
             
             elif action_type == "calendar_create":
                 return await mcp_client.call_tool_via_auth(
-                    "calendar_create_event",
+                    "create_event",  # Use the actual FastMCP tool name
                     {
                         "summary": params.get("title", ""),
                         "start_time": params.get("start_time", ""),
@@ -456,7 +456,7 @@ Current conversation context will be provided with each message."""
             
             elif action_type == "email_send":
                 return await mcp_client.call_tool_via_auth(
-                    "gmail_send",
+                    "send_gmail_message",  # Use the actual FastMCP tool name
                     {
                         "to": params.get("to", ""),
                         "subject": params.get("subject", ""),
@@ -469,7 +469,7 @@ Current conversation context will be provided with each message."""
             
             elif action_type == "email_search":
                 return await mcp_client.call_tool_via_auth(
-                    "gmail_search",
+                    "search_gmail_messages",  # Use the actual FastMCP tool name
                     {
                         "query": params.get("query", ""),
                         "page_size": params.get("max_results", 10)

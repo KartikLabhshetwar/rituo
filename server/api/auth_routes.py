@@ -16,10 +16,76 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/auth", tags=["authentication"])
 
+async def handle_mcp_temp_token(temp_token: str) -> Dict[str, Any]:
+    """Handle temporary token from MCP server OAuth flow"""
+    try:
+        # Validate temp token
+        temp_tokens_dir = os.path.join(os.path.dirname(__file__), '..', '.temp_tokens')
+        temp_token_file = os.path.join(temp_tokens_dir, f"{temp_token}.txt")
+        
+        if not os.path.exists(temp_token_file):
+            logger.error(f"Temp token file not found: {temp_token_file}")
+            raise HTTPException(status_code=400, detail="Invalid or expired temporary token")
+        
+        # Read user email from temp token file
+        with open(temp_token_file, 'r') as f:
+            user_email = f.read().strip()
+        
+        logger.info(f"Temp token validated for user: {user_email}")
+        
+        # Clean up temp token immediately
+        try:
+            os.remove(temp_token_file)
+        except Exception as e:
+            logger.warning(f"Failed to cleanup temp token file: {e}")
+        
+        # Get user credentials from MCP server's OAuth session store
+        try:
+            from auth.oauth21_session_store import get_oauth21_session_store
+            store = get_oauth21_session_store()
+            
+            # Try to get session by user email
+            session_data = None
+            for session_id in store.list_sessions():
+                session = store.get_session(session_id)
+                if session and session.get('user_email') == user_email:
+                    session_data = session
+                    break
+            
+            if session_data:
+                logger.info(f"Found MCP session for user: {user_email}")
+            else:
+                logger.warning(f"No MCP session found for user: {user_email}, proceeding with basic info")
+        except Exception as e:
+            logger.warning(f"Failed to access MCP session store: {e}")
+            session_data = None
+        
+        # Return user info in the format expected by the auth service
+        # This mimics the structure returned by Google's userinfo endpoint
+        return {
+            "email": user_email,
+            "name": user_email.split("@")[0] if "@" in user_email else user_email,
+            "sub": f"mcp_{user_email}",  # Unique identifier
+            "picture": None,  # Could be fetched from Google API if needed
+            "given_name": user_email.split("@")[0] if "@" in user_email else user_email,
+            "family_name": "",
+            "locale": "en",
+            "verified_email": True,
+            "hd": user_email.split("@")[1] if "@" in user_email else None,
+            "_mcp_authenticated": True  # Flag to indicate this came from MCP server
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to handle MCP temp token: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to process MCP authentication: {str(e)}")
+
 class GoogleAuthRequest(BaseModel):
     """Google OAuth token request"""
     token: str = None
     authorization_code: str = None
+    temp_token: str = None  # New field for MCP server temp tokens
     state: str = None
 
 class AuthResponse(BaseModel):
@@ -43,7 +109,7 @@ async def google_auth(request: GoogleAuthRequest):
     try:
         google_user_info = None
         
-        # Handle both JWT token and authorization code flows
+        # Handle multiple auth flows: JWT token, authorization code, or MCP temp token
         if request.token:
             logger.info(f"Processing JWT token (first 50 chars): {request.token[:50]}...")
             google_user_info = await auth_service.verify_google_token(request.token)
@@ -51,10 +117,14 @@ async def google_auth(request: GoogleAuthRequest):
             logger.info(f"Processing authorization code: {request.authorization_code[:20]}...")
             # Exchange authorization code for user info
             google_user_info = await auth_service.exchange_auth_code(request.authorization_code)
+        elif request.temp_token:
+            logger.info(f"Processing MCP server temp token: {request.temp_token[:20]}...")
+            # Handle temp token from MCP server OAuth flow
+            google_user_info = await handle_mcp_temp_token(request.temp_token)
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Either token or authorization_code must be provided"
+                detail="Either token, authorization_code, or temp_token must be provided"
             )
         
         logger.info(f"Google auth verified successfully for user: {google_user_info.get('email')}")

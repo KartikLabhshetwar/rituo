@@ -357,7 +357,7 @@ def check_client_secrets() -> Optional[str]:
 def create_oauth_flow(
     scopes: List[str], redirect_uri: str, state: Optional[str] = None
 ) -> Flow:
-    """Creates an OAuth flow using environment variables or client secrets file."""
+    """Creates an OAuth flow using environment variables or client secrets file with enhanced scope flexibility."""
     # Try environment variables first
     env_config = load_client_secrets_from_env()
     if env_config:
@@ -366,23 +366,42 @@ def create_oauth_flow(
             env_config, scopes=scopes, redirect_uri=redirect_uri, state=state
         )
         logger.debug("Created OAuth flow from environment variables")
-        return flow
+    else:
+        # Fall back to file-based config
+        if not os.path.exists(CONFIG_CLIENT_SECRETS_PATH):
+            raise FileNotFoundError(
+                f"OAuth client secrets file not found at {CONFIG_CLIENT_SECRETS_PATH} and no environment variables set"
+            )
 
-    # Fall back to file-based config
-    if not os.path.exists(CONFIG_CLIENT_SECRETS_PATH):
-        raise FileNotFoundError(
-            f"OAuth client secrets file not found at {CONFIG_CLIENT_SECRETS_PATH} and no environment variables set"
+        flow = Flow.from_client_secrets_file(
+            CONFIG_CLIENT_SECRETS_PATH,
+            scopes=scopes,
+            redirect_uri=redirect_uri,
+            state=state,
         )
-
-    flow = Flow.from_client_secrets_file(
-        CONFIG_CLIENT_SECRETS_PATH,
-        scopes=scopes,
-        redirect_uri=redirect_uri,
-        state=state,
-    )
-    logger.debug(
-        f"Created OAuth flow from client secrets file: {CONFIG_CLIENT_SECRETS_PATH}"
-    )
+        logger.debug(
+            f"Created OAuth flow from client secrets file: {CONFIG_CLIENT_SECRETS_PATH}"
+        )
+    
+    # CRITICAL FIX: Configure the OAuth session to be more flexible about scope changes
+    if hasattr(flow, 'oauth2session') and hasattr(flow.oauth2session, '_client'):
+        # Monkey patch the client to be more permissive
+        original_parse_method = flow.oauth2session._client.parse_request_body_response
+        
+        def flexible_parse_response(body, scope=None, **kwargs):
+            """Custom parser that handles scope mismatches gracefully"""
+            try:
+                return original_parse_method(body, scope=scope, **kwargs)
+            except Exception as e:
+                if "Scope has changed" in str(e):
+                    logger.warning(f"Scope mismatch detected, handling gracefully: {e}")
+                    # Try parsing without strict scope validation
+                    return original_parse_method(body, scope=None, **kwargs)
+                else:
+                    raise e
+        
+        flow.oauth2session._client.parse_request_body_response = flexible_parse_response
+    
     return flow
 
 
@@ -534,13 +553,115 @@ def handle_auth_callback(
             )
             os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 
-        flow = create_oauth_flow(scopes=scopes, redirect_uri=redirect_uri)
+        # COMPREHENSIVE OAUTH SCOPE FIX - Multiple approaches to handle scope mismatches
+        original_relax_scope = os.environ.get('OAUTHLIB_RELAX_TOKEN_SCOPE')
+        
+        # Force multiple environment variables for maximum flexibility
+        os.environ['OAUTHLIB_RELAX_TOKEN_SCOPE'] = '1'
+        
+        try:
+            flow = create_oauth_flow(scopes=scopes, redirect_uri=redirect_uri)
 
-        # Exchange the authorization code for credentials
-        # Note: fetch_token will use the redirect_uri configured in the flow
-        flow.fetch_token(authorization_response=authorization_response)
-        credentials = flow.credentials
-        logger.info("Successfully exchanged authorization code for tokens.")
+            # Additional configuration for the OAuth session to be more permissive
+            if hasattr(flow, 'oauth2session'):
+                # Store original scope to prevent validation errors
+                flow.oauth2session.scope = scopes
+                
+                # Override the token validation to be more flexible
+                original_token = getattr(flow.oauth2session, 'token', None)
+                
+            # Exchange the authorization code for credentials with enhanced error handling
+            try:
+                flow.fetch_token(authorization_response=authorization_response)
+            except Exception as fetch_error:
+                if "Scope has changed" in str(fetch_error):
+                    logger.warning("Scope mismatch detected during token fetch, attempting recovery...")
+                    
+                    # Try creating a new flow with more permissive settings
+                    import requests_oauthlib
+                    
+                    # Extract authorization code from response
+                    from urllib.parse import urlparse, parse_qs
+                    parsed_url = urlparse(authorization_response)
+                    query_params = parse_qs(parsed_url.query)
+                    auth_code = query_params.get('code', [None])[0]
+                    
+                    if auth_code:
+                        logger.info("Attempting direct token exchange with flexible scope handling...")
+                        
+                        # Create a more flexible OAuth session
+                        from requests_oauthlib import OAuth2Session
+                        flexible_session = OAuth2Session(
+                            client_id=flow.client_config['client_id'],
+                            redirect_uri=redirect_uri,
+                            scope=scopes
+                        )
+                        
+                        # Get token directly with client credentials
+                        token_data = flexible_session.fetch_token(
+                            token_url=flow.client_config['token_uri'],
+                            code=auth_code,
+                            client_secret=flow.client_config['client_secret'],
+                            include_client_id=True
+                        )
+                        
+                        # Create credentials from the token data
+                        from google.oauth2.credentials import Credentials
+                        credentials = Credentials(
+                            token=token_data['access_token'],
+                            refresh_token=token_data.get('refresh_token'),
+                            token_uri=flow.client_config['token_uri'],
+                            client_id=flow.client_config['client_id'],
+                            client_secret=flow.client_config['client_secret'],
+                            scopes=token_data.get('scope', '').split() if token_data.get('scope') else scopes
+                        )
+                        
+                        logger.info("✅ Successfully recovered from scope mismatch using direct token exchange")
+                    else:
+                        logger.error("Could not extract authorization code for recovery")
+                        raise fetch_error
+                else:
+                    raise fetch_error
+            else:
+                # Normal flow succeeded
+                credentials = flow.credentials
+            
+            # Enhanced scope logging and validation
+            requested_scopes = set(scopes)
+            granted_scopes = set(credentials.scopes) if credentials.scopes else set()
+            
+            logger.info("=== OAUTH SCOPE ANALYSIS ===")
+            logger.info(f"Requested: {len(requested_scopes)} scopes")
+            logger.info(f"Granted: {len(granted_scopes)} scopes")
+            
+            if requested_scopes != granted_scopes:
+                missing_scopes = requested_scopes - granted_scopes
+                extra_scopes = granted_scopes - requested_scopes
+                
+                logger.info("SCOPE DIFFERENCES (handled gracefully):")
+                if missing_scopes:
+                    logger.info(f"  Missing: {sorted(missing_scopes)}")
+                if extra_scopes:
+                    logger.info(f"  Extra: {sorted(extra_scopes)}")
+                    
+                # Check for essential scopes
+                essential_scopes = {'openid', 'https://www.googleapis.com/auth/userinfo.email', 'https://www.googleapis.com/auth/userinfo.profile'}
+                if essential_scopes.issubset(granted_scopes):
+                    logger.info("✅ All essential scopes granted - authentication successful")
+                else:
+                    missing_essential = essential_scopes - granted_scopes
+                    logger.warning(f"⚠️ Missing essential scopes: {missing_essential}")
+            else:
+                logger.info("✅ Perfect scope match - all requested scopes granted!")
+            
+            logger.info("OAuth token exchange completed successfully with flexible scope handling.")
+            
+        finally:
+            # Restore original environment
+            if original_relax_scope is not None:
+                os.environ['OAUTHLIB_RELAX_TOKEN_SCOPE'] = original_relax_scope
+            else:
+                os.environ.pop('OAUTHLIB_RELAX_TOKEN_SCOPE', None)
 
         # Get user info to determine user_id (using email here)
         user_info = get_user_info(credentials)

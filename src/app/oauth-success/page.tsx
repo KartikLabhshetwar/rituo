@@ -12,6 +12,8 @@ export default function OAuthSuccess() {
   useEffect(() => {
     const handleOAuthCallback = async () => {
       const code = searchParams.get('code')
+      const tempToken = searchParams.get('temp_token')
+      const user = searchParams.get('user')
       const error = searchParams.get('error')
       const state = searchParams.get('state')
 
@@ -21,53 +23,104 @@ export default function OAuthSuccess() {
         return
       }
 
-      if (!code) {
-        setStatus('error')
-        setMessage('No authorization code received from Google')
+      // Prioritize temp token (new MCP server flow) over authorization code
+      if (tempToken) {
+        try {
+          setMessage('Completing MCP server authentication...')
+          
+          // Exchange temp token with backend
+          const response = await fetch('http://localhost:8000/api/auth/google', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            credentials: 'include',
+            body: JSON.stringify({
+              temp_token: tempToken
+            }),
+          })
+
+          if (response.ok) {
+            const data = await response.json()
+            
+            // Store tokens
+            localStorage.setItem('access_token', data.access_token)
+            if (data.refresh_token) {
+              localStorage.setItem('refresh_token', data.refresh_token)
+            }
+            localStorage.setItem('user', JSON.stringify(data.user))
+            
+            setStatus('success')
+            setMessage('Successfully authenticated via MCP server!')
+            
+            // Redirect to chat after 2 seconds
+            setTimeout(() => {
+              router.push('/chat')
+            }, 2000)
+          } else {
+            const errorData = await response.json()
+            setStatus('error')
+            setMessage(errorData.detail || 'MCP authentication failed')
+          }
+        } catch (error) {
+          setStatus('error')
+          setMessage('Network error during MCP authentication')
+          console.error('MCP OAuth callback error:', error)
+        }
         return
       }
 
-      try {
-        // Exchange authorization code for tokens via your backend
-        const response = await fetch('http://localhost:8000/api/auth/google', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          credentials: 'include',
-          body: JSON.stringify({
-            authorization_code: code,
-            state: state
-          }),
-        })
+      // Fallback to authorization code flow (legacy)
+      if (code) {
+        try {
+          setMessage('Processing authorization code...')
+          
+          // Exchange authorization code for tokens via your backend
+          const response = await fetch('http://localhost:8000/api/auth/google', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            credentials: 'include',
+            body: JSON.stringify({
+              authorization_code: code,
+              state: state
+            }),
+          })
 
-        if (response.ok) {
-          const data = await response.json()
-          
-          // Store tokens
-          localStorage.setItem('access_token', data.access_token)
-          if (data.refresh_token) {
-            localStorage.setItem('refresh_token', data.refresh_token)
+          if (response.ok) {
+            const data = await response.json()
+            
+            // Store tokens
+            localStorage.setItem('access_token', data.access_token)
+            if (data.refresh_token) {
+              localStorage.setItem('refresh_token', data.refresh_token)
+            }
+            localStorage.setItem('user', JSON.stringify(data.user))
+            
+            setStatus('success')
+            setMessage('Successfully authenticated!')
+            
+            // Redirect to chat after 2 seconds
+            setTimeout(() => {
+              router.push('/chat')
+            }, 2000)
+          } else {
+            const errorData = await response.json()
+            setStatus('error')
+            setMessage(errorData.detail || 'Authentication failed')
           }
-          localStorage.setItem('user', JSON.stringify(data.user))
-          
-          setStatus('success')
-          setMessage('Successfully authenticated!')
-          
-          // Redirect to chat after 2 seconds
-          setTimeout(() => {
-            router.push('/chat')
-          }, 2000)
-        } else {
-          const errorData = await response.json()
+        } catch (error) {
           setStatus('error')
-          setMessage(errorData.detail || 'Authentication failed')
+          setMessage('Network error during authentication')
+          console.error('OAuth callback error:', error)
         }
-      } catch (error) {
-        setStatus('error')
-        setMessage('Network error during authentication')
-        console.error('OAuth callback error:', error)
+        return
       }
+
+      // No valid authentication parameters
+      setStatus('error')
+      setMessage('No valid authentication credentials received')
     }
 
     handleOAuthCallback()

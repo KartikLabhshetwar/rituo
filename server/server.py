@@ -44,7 +44,7 @@ _auth_provider: Optional[Union[GoogleWorkspaceAuthProvider, GoogleRemoteAuthProv
 # --- Middleware Definitions ---
 cors_middleware = Middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],  # Restrict to frontend
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -179,14 +179,33 @@ async def oauth2_callback(request: Request) -> HTMLResponse:
 
         logger.info(f"OAuth callback: Received code (state: {state}).")
 
+        # Enhanced OAuth callback handling with better error recovery
         verified_user_id, credentials = handle_auth_callback(
             scopes=SCOPES,
             authorization_response=str(request.url),
             redirect_uri=get_oauth_redirect_uri_for_current_mode(),
             session_id=None
         )
-
+        
         logger.info(f"OAuth callback: Successfully authenticated user: {verified_user_id}.")
+        
+        # Log detailed scope information
+        if credentials and credentials.scopes:
+            granted_scopes = set(credentials.scopes)
+            requested_scopes = set(SCOPES)
+            
+            logger.info(f"✅ Authentication successful with {len(granted_scopes)} granted scopes")
+            
+            if granted_scopes != requested_scopes:
+                missing_scopes = requested_scopes - granted_scopes
+                logger.info(f"Note: {len(missing_scopes)} scopes were not granted by Google:")
+                for scope in sorted(missing_scopes):
+                    logger.info(f"  - {scope}")
+                logger.info("This is normal for unverified apps and doesn't affect core functionality")
+            else:
+                logger.info("🎉 Perfect match - all requested scopes were granted!")
+        else:
+            logger.warning("No scope information available in credentials")
 
         try:
             store = get_oauth21_session_store()

@@ -67,52 +67,91 @@ class GoogleWorkspaceMCPClient:
     
     async def call_tool_via_auth(self, tool_name: str, arguments: Dict[str, Any], user_email: str) -> Dict[str, Any]:
         """
-        Call a Google Workspace tool by triggering the OAuth flow
-        This is a workaround since we can't directly call MCP tools via HTTP
+        Call a Google Workspace tool through the FastMCP server via HTTP
         """
         if not self.connected or not self.client:
             raise Exception("Not connected to MCP server")
         
         try:
-            # For now, we'll simulate tool calls by returning structured responses
-            # In a production environment, you'd want to implement proper MCP HTTP transport
+            logger.info(f"Calling FastMCP tool: {tool_name} with args: {arguments} for user: {user_email}")
             
-            logger.info(f"Simulating MCP tool call: {tool_name} with args: {arguments}")
+            # FastMCP exposes tools at /tools/{tool_name}
+            endpoint = f"{self.server_url}/tools/{tool_name}"
             
-            # Simulate different tool responses
-            if tool_name == "gmail_search":
-                return {
-                    "success": True,
-                    "tool_name": tool_name,
-                    "result": f"Found emails matching query: {arguments.get('query', '')}",
-                    "arguments": arguments,
-                    "note": "This is a simulated response. Implement proper MCP HTTP transport for real functionality."
+            # Prepare the request payload - FastMCP expects arguments plus any context
+            payload = {
+                **arguments,
+                "user_google_email": user_email  # This is the parameter name the tools expect
+            }
+            
+            logger.info(f"Calling endpoint: {endpoint} with payload: {payload}")
+            
+            response = await self.client.post(
+                endpoint,
+                json=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json"
                 }
-            elif tool_name == "calendar_search":
+            )
+            
+            logger.info(f"Response status: {response.status_code}")
+            
+            if response.status_code == 200:
+                try:
+                    result = response.json()
+                    logger.info(f"✅ Successfully called {tool_name} via FastMCP")
+                    return {
+                        "success": True,
+                        "tool_name": tool_name,
+                        "result": result,
+                        "arguments": arguments
+                    }
+                except Exception as json_error:
+                    # Sometimes FastMCP returns plain text
+                    result_text = response.text
+                    logger.info(f"✅ FastMCP returned text response: {result_text[:200]}...")
+                    return {
+                        "success": True,
+                        "tool_name": tool_name,
+                        "result": result_text,
+                        "arguments": arguments
+                    }
+            elif response.status_code == 404:
+                logger.error(f"Tool {tool_name} not found on FastMCP server")
                 return {
-                    "success": True,
+                    "success": False,
                     "tool_name": tool_name,
-                    "result": f"Found calendar events matching: {arguments.get('query', '')}",
-                    "arguments": arguments,
-                    "note": "This is a simulated response. Implement proper MCP HTTP transport for real functionality."
+                    "error": f"Tool '{tool_name}' not found on MCP server",
+                    "arguments": arguments
                 }
-            elif tool_name == "tasks_list":
+            elif response.status_code == 401:
+                logger.error(f"Authentication required for tool {tool_name}")
                 return {
-                    "success": True,
+                    "success": False,
                     "tool_name": tool_name,
-                    "result": "Listed tasks from default task list",
+                    "error": f"Authentication required for {tool_name}. Please authenticate with Google first.",
                     "arguments": arguments,
-                    "note": "This is a simulated response. Implement proper MCP HTTP transport for real functionality."
+                    "auth_required": True
                 }
             else:
+                error_text = response.text
+                logger.error(f"Tool {tool_name} returned status {response.status_code}: {error_text}")
                 return {
-                    "success": True,
+                    "success": False,
                     "tool_name": tool_name,
-                    "result": f"Executed {tool_name} successfully",
-                    "arguments": arguments,
-                    "note": "This is a simulated response. Implement proper MCP HTTP transport for real functionality."
+                    "error": f"HTTP {response.status_code}: {error_text}",
+                    "arguments": arguments
                 }
                 
+        except httpx.RequestError as e:
+            logger.error(f"Request failed for {tool_name}: {e}")
+            return {
+                "success": False,
+                "tool_name": tool_name,
+                "error": f"Network error calling MCP server: {str(e)}",
+                "arguments": arguments
+            }
         except Exception as e:
             logger.error(f"Error calling tool {tool_name}: {e}")
             return {
@@ -134,29 +173,36 @@ class GoogleWorkspaceMCPClient:
         })
     
     async def create_calendar_event(self, title: str, start_time: str, end_time: str, 
-                                  description: str = "", attendees: List[str] = None) -> Dict[str, Any]:
+                                  description: str = "", attendees: List[str] = None, user_email: str = "") -> Dict[str, Any]:
         """Create a calendar event using MCP tools"""
-        return await self.call_tool("calendar_create_event", {
+        arguments = {
             "summary": title,
             "start_time": start_time,
             "end_time": end_time,
             "description": description,
             "attendees": attendees or []
-        })
+        }
+        return await self.call_tool_via_auth("create_event", arguments, user_email)
     
     async def send_email(self, to: List[str], subject: str, body: str, 
-                        cc: List[str] = None, bcc: List[str] = None) -> Dict[str, Any]:
+                        cc: List[str] = None, bcc: List[str] = None, user_email: str = "") -> Dict[str, Any]:
         """Send an email using MCP tools"""
-        return await self.call_tool("gmail_send", {
+        arguments = {
             "to": to,
             "subject": subject,
             "body": body,
             "cc": cc or [],
             "bcc": bcc or []
-        })
+        }
+        return await self.call_tool_via_auth("send_gmail_message", arguments, user_email)
     
-    async def search_emails(self, query: str, max_results: int = 10) -> Dict[str, Any]:
+    async def search_emails(self, query: str, max_results: int = 10, user_email: str = "") -> Dict[str, Any]:
         """Search emails using MCP tools"""
+        arguments = {
+            "query": query,
+            "page_size": max_results
+        }
+        return await self.call_tool_via_auth("search_gmail_messages", arguments, user_email)
         return await self.call_tool("gmail_search", {
             "query": query,
             "max_results": max_results

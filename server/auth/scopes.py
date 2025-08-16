@@ -20,13 +20,13 @@ CALENDAR_READONLY_SCOPE = 'https://www.googleapis.com/auth/calendar.readonly'
 CALENDAR_EVENTS_SCOPE = 'https://www.googleapis.com/auth/calendar.events'
 
 # Google Drive scopes
-DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive'
-DRIVE_READONLY_SCOPE = 'https://www.googleapis.com/auth/drive.readonly'
-DRIVE_FILE_SCOPE = 'https://www.googleapis.com/auth/drive.file'
+# DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive'
+# DRIVE_READONLY_SCOPE = 'https://www.googleapis.com/auth/drive.readonly'
+# DRIVE_FILE_SCOPE = 'https://www.googleapis.com/auth/drive.file'
 
 # Google Docs scopes
-DOCS_READONLY_SCOPE = 'https://www.googleapis.com/auth/documents.readonly'
-DOCS_WRITE_SCOPE = 'https://www.googleapis.com/auth/documents'
+# DOCS_READONLY_SCOPE = 'https://www.googleapis.com/auth/documents.readonly'
+# DOCS_WRITE_SCOPE = 'https://www.googleapis.com/auth/documents'
 
 # Gmail API scopes
 GMAIL_READONLY_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly'
@@ -36,29 +36,29 @@ GMAIL_MODIFY_SCOPE = 'https://www.googleapis.com/auth/gmail.modify'
 GMAIL_LABELS_SCOPE = 'https://www.googleapis.com/auth/gmail.labels'
 
 # Google Chat API scopes
-CHAT_READONLY_SCOPE = 'https://www.googleapis.com/auth/chat.messages.readonly'
-CHAT_WRITE_SCOPE = 'https://www.googleapis.com/auth/chat.messages'
-CHAT_SPACES_SCOPE = 'https://www.googleapis.com/auth/chat.spaces'
+# CHAT_READONLY_SCOPE = 'https://www.googleapis.com/auth/chat.messages.readonly'
+# CHAT_WRITE_SCOPE = 'https://www.googleapis.com/auth/chat.messages'
+# CHAT_SPACES_SCOPE = 'https://www.googleapis.com/auth/chat.spaces'
 
 # Google Sheets API scopes
-SHEETS_READONLY_SCOPE = 'https://www.googleapis.com/auth/spreadsheets.readonly'
-SHEETS_WRITE_SCOPE = 'https://www.googleapis.com/auth/spreadsheets'
+# SHEETS_READONLY_SCOPE = 'https://www.googleapis.com/auth/spreadsheets.readonly'
+# SHEETS_WRITE_SCOPE = 'https://www.googleapis.com/auth/spreadsheets'
 
 # Google Forms API scopes
-FORMS_BODY_SCOPE = 'https://www.googleapis.com/auth/forms.body'
-FORMS_BODY_READONLY_SCOPE = 'https://www.googleapis.com/auth/forms.body.readonly'
-FORMS_RESPONSES_READONLY_SCOPE = 'https://www.googleapis.com/auth/forms.responses.readonly'
+# FORMS_BODY_SCOPE = 'https://www.googleapis.com/auth/forms.body'
+# FORMS_BODY_READONLY_SCOPE = 'https://www.googleapis.com/auth/forms.body.readonly'
+# FORMS_RESPONSES_READONLY_SCOPE = 'https://www.googleapis.com/auth/forms.responses.readonly'
 
-# Google Slides API scopes
-SLIDES_SCOPE = 'https://www.googleapis.com/auth/presentations'
-SLIDES_READONLY_SCOPE = 'https://www.googleapis.com/auth/presentations.readonly'
+# # Google Slides API scopes
+# SLIDES_SCOPE = 'https://www.googleapis.com/auth/presentations'
+# SLIDES_READONLY_SCOPE = 'https://www.googleapis.com/auth/presentations.readonly'
 
 # Google Tasks API scopes
 TASKS_SCOPE = 'https://www.googleapis.com/auth/tasks'
 TASKS_READONLY_SCOPE = 'https://www.googleapis.com/auth/tasks.readonly'
 
 # Google Custom Search API scope
-CUSTOM_SEARCH_SCOPE = 'https://www.googleapis.com/auth/cse'
+# CUSTOM_SEARCH_SCOPE = 'https://www.googleapis.com/auth/cse'
 
 # Base OAuth scopes required for user identification
 BASE_SCOPES = [
@@ -68,10 +68,10 @@ BASE_SCOPES = [
 ]
 
 # Service-specific scope groups
-DOCS_SCOPES = [
-    DOCS_READONLY_SCOPE,
-    DOCS_WRITE_SCOPE
-]
+# DOCS_SCOPES = [
+#     DOCS_READONLY_SCOPE,
+#     DOCS_WRITE_SCOPE
+# ]
 
 CALENDAR_SCOPES = [
     CALENDAR_SCOPE,
@@ -79,11 +79,11 @@ CALENDAR_SCOPES = [
     CALENDAR_EVENTS_SCOPE
 ]
 
-DRIVE_SCOPES = [
-    DRIVE_SCOPE,
-    DRIVE_READONLY_SCOPE,
-    DRIVE_FILE_SCOPE
-]
+# DRIVE_SCOPES = [
+#     DRIVE_SCOPE,
+#     DRIVE_READONLY_SCOPE,
+#     DRIVE_FILE_SCOPE
+# ]
 
 GMAIL_SCOPES = [
     GMAIL_READONLY_SCOPE,
@@ -93,49 +93,49 @@ GMAIL_SCOPES = [
     GMAIL_LABELS_SCOPE
 ]
 
-CHAT_SCOPES = [
-    CHAT_READONLY_SCOPE,
-    CHAT_WRITE_SCOPE,
-    CHAT_SPACES_SCOPE
-]
+# CHAT_SCOPES = [
+#     CHAT_READONLY_SCOPE,
+#     CHAT_WRITE_SCOPE,
+#     CHAT_SPACES_SCOPE
+# ]
 
-SHEETS_SCOPES = [
-    SHEETS_READONLY_SCOPE,
-    SHEETS_WRITE_SCOPE
-]
+# SHEETS_SCOPES = [
+#     SHEETS_READONLY_SCOPE,
+#     SHEETS_WRITE_SCOPE
+# ]
 
-FORMS_SCOPES = [
-    FORMS_BODY_SCOPE,
-    FORMS_BODY_READONLY_SCOPE,
-    FORMS_RESPONSES_READONLY_SCOPE
-]
+# FORMS_SCOPES = [
+#     FORMS_BODY_SCOPE,
+#     FORMS_BODY_READONLY_SCOPE,
+#     FORMS_RESPONSES_READONLY_SCOPE
+# ]
 
-SLIDES_SCOPES = [
-    SLIDES_SCOPE,
-    SLIDES_READONLY_SCOPE
-]
+# SLIDES_SCOPES = [
+#     SLIDES_SCOPE,
+#     SLIDES_READONLY_SCOPE
+# ]
 
 TASKS_SCOPES = [
     TASKS_SCOPE,
     TASKS_READONLY_SCOPE
 ]
 
-CUSTOM_SEARCH_SCOPES = [
-    CUSTOM_SEARCH_SCOPE
-]
+# CUSTOM_SEARCH_SCOPES = [
+#     CUSTOM_SEARCH_SCOPE
+# ]
 
 # Tool-to-scopes mapping
 TOOL_SCOPES_MAP = {
     'gmail': GMAIL_SCOPES,
-    'drive': DRIVE_SCOPES,
+    # 'drive': DRIVE_SCOPES,
     'calendar': CALENDAR_SCOPES,
-    'docs': DOCS_SCOPES,
-    'sheets': SHEETS_SCOPES,
-    'chat': CHAT_SCOPES,
-    'forms': FORMS_SCOPES,
-    'slides': SLIDES_SCOPES,
+    # 'docs': DOCS_SCOPES,
+    # 'sheets': SHEETS_SCOPES,
+    # 'chat': CHAT_SCOPES,
+    # 'forms': FORMS_SCOPES,
+    # 'slides': SLIDES_SCOPES,
     'tasks': TASKS_SCOPES,
-    'search': CUSTOM_SEARCH_SCOPES
+    # 'search': CUSTOM_SEARCH_SCOPES
 }
 
 def set_enabled_tools(enabled_tools):
