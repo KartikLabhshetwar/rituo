@@ -89,10 +89,27 @@ class GoogleWorkspaceMCPClient:
                 result = await self.client.call_tool(tool_name, tool_arguments)
                 
                 logger.info(f"✅ Successfully called {tool_name} via MCP protocol")
+                
+                # Extract the actual content from CallToolResult
+                if hasattr(result, 'content') and result.content:
+                    # Handle list of content items
+                    if isinstance(result.content, list) and len(result.content) > 0:
+                        first_content = result.content[0]
+                        if hasattr(first_content, 'text'):
+                            result_text = first_content.text
+                        else:
+                            result_text = str(first_content)
+                    else:
+                        result_text = str(result.content)
+                elif hasattr(result, 'text'):
+                    result_text = result.text
+                else:
+                    result_text = str(result)
+                
                 return {
                     "success": True,
                     "tool_name": tool_name,
-                    "result": result,
+                    "result": result_text,
                     "arguments": arguments
                 }
                 
@@ -149,16 +166,103 @@ class GoogleWorkspaceMCPClient:
             arguments["timezone"] = timezone
         return await self.call_tool_via_auth("create_event", arguments, user_email)
     
-    async def send_email(self, to: List[str], subject: str, body: str, 
-                        cc: List[str] = None, bcc: List[str] = None, user_email: str = "") -> Dict[str, Any]:
+    async def get_calendar_events(self, time_min: str = None, time_max: str = None, max_results: int = 10, calendar_id: str = "primary", user_email: str = "") -> Dict[str, Any]:
+        """Get calendar events using MCP tools"""
+        from datetime import datetime, timedelta
+        
+        # Default to tomorrow if no dates provided
+        if not time_min:
+            tomorrow = datetime.now() + timedelta(days=1)
+            time_min = tomorrow.strftime("%Y-%m-%d")
+        
+        # Fix the date range issue - if time_max is the same as time_min, we need to extend it to the end of the day
+        if not time_max:
+            if time_min:
+                # Parse time_min and add 1 day to get the full day
+                if "T" in time_min:
+                    start_dt = datetime.fromisoformat(time_min.replace('Z', ''))
+                else:
+                    start_dt = datetime.strptime(time_min, "%Y-%m-%d")
+                end_dt = start_dt + timedelta(days=1)
+                time_max = end_dt.strftime("%Y-%m-%d")
+            else:
+                time_max = time_min
+        else:
+            # If time_max is the same date as time_min (e.g., both "2025-08-21"), extend time_max to end of day
+            if time_min and time_max == time_min and "T" not in time_max:
+                # Both are date-only and the same - extend time_max to next day
+                if "T" in time_min:
+                    start_dt = datetime.fromisoformat(time_min.replace('Z', ''))
+                else:
+                    start_dt = datetime.strptime(time_min, "%Y-%m-%d")
+                end_dt = start_dt + timedelta(days=1)
+                time_max = end_dt.strftime("%Y-%m-%d")
+        
+        arguments = {
+            "calendar_id": calendar_id,
+            "time_min": time_min,
+            "time_max": time_max,
+            "max_results": max_results
+        }
+        return await self.call_tool_via_auth("get_events", arguments, user_email)
+    
+    async def list_calendars(self, user_email: str = "") -> Dict[str, Any]:
+        """List available calendars using MCP tools"""
+        arguments = {}
+        return await self.call_tool_via_auth("list_calendars", arguments, user_email)
+    
+    async def get_calendar_event(self, event_id: str, calendar_id: str = "primary", user_email: str = "") -> Dict[str, Any]:
+        """Get a specific calendar event using MCP tools"""
+        arguments = {
+            "event_id": event_id,
+            "calendar_id": calendar_id
+        }
+        return await self.call_tool_via_auth("get_event", arguments, user_email)
+    
+    async def modify_calendar_event(self, event_id: str, calendar_id: str = "primary", 
+                                  summary: str = None, start_time: str = None, end_time: str = None,
+                                  description: str = None, attendees: List[str] = None, 
+                                  timezone: str = None, user_email: str = "") -> Dict[str, Any]:
+        """Modify a calendar event using MCP tools"""
+        arguments = {
+            "event_id": event_id,
+            "calendar_id": calendar_id
+        }
+        if summary:
+            arguments["summary"] = summary
+        if start_time:
+            arguments["start_time"] = start_time
+        if end_time:
+            arguments["end_time"] = end_time
+        if description:
+            arguments["description"] = description
+        if attendees:
+            arguments["attendees"] = attendees
+        if timezone:
+            arguments["timezone"] = timezone
+            
+        return await self.call_tool_via_auth("modify_event", arguments, user_email)
+    
+    async def delete_calendar_event(self, event_id: str, calendar_id: str = "primary", user_email: str = "") -> Dict[str, Any]:
+        """Delete a calendar event using MCP tools"""
+        arguments = {
+            "event_id": event_id,
+            "calendar_id": calendar_id
+        }
+        return await self.call_tool_via_auth("delete_event", arguments, user_email)
+    
+    async def send_email(self, to: str, subject: str, body: str, 
+                        cc: str = None, bcc: str = None, user_email: str = "") -> Dict[str, Any]:
         """Send an email using MCP tools"""
         arguments = {
             "to": to,
             "subject": subject,
-            "body": body,
-            "cc": cc or [],
-            "bcc": bcc or []
+            "body": body
         }
+        if cc:
+            arguments["cc"] = cc
+        if bcc:
+            arguments["bcc"] = bcc
         return await self.call_tool_via_auth("send_gmail_message", arguments, user_email)
     
     async def search_emails(self, query: str, max_results: int = 10, user_email: str = "") -> Dict[str, Any]:
@@ -204,13 +308,127 @@ class GoogleWorkspaceMCPClient:
         }
         return await self.call_tool_via_auth("create_task", arguments, user_email)
     
-    async def list_tasks(self, task_list: str = "@default", max_results: int = 20, user_email: str = "") -> Dict[str, Any]:
+    async def list_tasks(self, task_list_id: str = None, max_results: int = 20, user_email: str = "") -> Dict[str, Any]:
         """List tasks using MCP tools"""
+        # If no task_list_id provided, get the default one
+        if not task_list_id:
+            try:
+                task_lists_result = await self.get_default_task_list(user_email)
+                if task_lists_result.get("success") and "result" in task_lists_result:
+                    import re
+                    id_match = re.search(r"ID:\s*([\w-]+)", task_lists_result["result"])
+                    if id_match:
+                        task_list_id = id_match.group(1)
+                    else:
+                        task_list_id = "@default"
+                else:
+                    task_list_id = "@default"
+            except Exception as e:
+                logger.warning(f"Failed to get default task list, using @default: {e}")
+                task_list_id = "@default"
+        
         arguments = {
-            "task_list": task_list,
+            "task_list_id": task_list_id,
             "max_results": max_results
         }
         return await self.call_tool_via_auth("list_tasks", arguments, user_email)
+    
+    async def list_task_lists(self, max_results: int = 10, user_email: str = "") -> Dict[str, Any]:
+        """List all task lists using MCP tools"""
+        arguments = {"max_results": max_results}
+        return await self.call_tool_via_auth("list_task_lists", arguments, user_email)
+    
+    async def get_task_list(self, task_list_id: str, user_email: str = "") -> Dict[str, Any]:
+        """Get a specific task list using MCP tools"""
+        arguments = {"task_list_id": task_list_id}
+        return await self.call_tool_via_auth("get_task_list", arguments, user_email)
+    
+    async def create_task_list(self, title: str, user_email: str = "") -> Dict[str, Any]:
+        """Create a new task list using MCP tools"""
+        arguments = {"title": title}
+        return await self.call_tool_via_auth("create_task_list", arguments, user_email)
+    
+    async def update_task_list(self, task_list_id: str, title: str, user_email: str = "") -> Dict[str, Any]:
+        """Update a task list using MCP tools"""
+        arguments = {
+            "task_list_id": task_list_id,
+            "title": title
+        }
+        return await self.call_tool_via_auth("update_task_list", arguments, user_email)
+    
+    async def delete_task_list(self, task_list_id: str, user_email: str = "") -> Dict[str, Any]:
+        """Delete a task list using MCP tools"""
+        arguments = {"task_list_id": task_list_id}
+        return await self.call_tool_via_auth("delete_task_list", arguments, user_email)
+    
+    async def get_task(self, task_list_id: str, task_id: str, user_email: str = "") -> Dict[str, Any]:
+        """Get a specific task using MCP tools"""
+        arguments = {
+            "task_list_id": task_list_id,
+            "task_id": task_id
+        }
+        return await self.call_tool_via_auth("get_task", arguments, user_email)
+    
+    async def update_task(self, task_list_id: str, task_id: str, title: str = None, 
+                         notes: str = None, status: str = None, due: str = None, 
+                         user_email: str = "") -> Dict[str, Any]:
+        """Update a task using MCP tools"""
+        arguments = {
+            "task_list_id": task_list_id,
+            "task_id": task_id
+        }
+        if title:
+            arguments["title"] = title
+        if notes:
+            arguments["notes"] = notes
+        if status:
+            arguments["status"] = status
+        if due:
+            arguments["due"] = due
+            
+        return await self.call_tool_via_auth("update_task", arguments, user_email)
+    
+    async def delete_task(self, task_list_id: str, task_id: str, user_email: str = "") -> Dict[str, Any]:
+        """Delete a task using MCP tools"""
+        arguments = {
+            "task_list_id": task_list_id,
+            "task_id": task_id
+        }
+        return await self.call_tool_via_auth("delete_task", arguments, user_email)
+    
+    async def move_task(self, task_list_id: str, task_id: str, parent: str = None, 
+                       previous: str = None, user_email: str = "") -> Dict[str, Any]:
+        """Move a task to a different position using MCP tools"""
+        arguments = {
+            "task_list_id": task_list_id,
+            "task_id": task_id
+        }
+        if parent:
+            arguments["parent"] = parent
+        if previous:
+            arguments["previous"] = previous
+            
+        return await self.call_tool_via_auth("move_task", arguments, user_email)
+    
+    async def clear_completed_tasks(self, task_list_id: str, user_email: str = "") -> Dict[str, Any]:
+        """Clear completed tasks from a task list using MCP tools"""
+        arguments = {"task_list_id": task_list_id}
+        return await self.call_tool_via_auth("clear_completed_tasks", arguments, user_email)
+    
+    async def debug_user_scopes(self, user_email: str = "") -> Dict[str, Any]:
+        """Debug function to check what scopes the user actually has"""
+        try:
+            # This will help us see what's wrong with Gmail permissions
+            result = await self.call_tool_via_auth("start_google_auth", {
+                "user_email": user_email,
+                "service_name": "gmail"
+            }, user_email)
+            return result
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Debug failed: {str(e)}"
+            }
     
     # Gmail Methods
     async def search_gmail_messages(self, query: str, page_size: int = 10, user_email: str = "") -> Dict[str, Any]:
@@ -288,6 +506,14 @@ class GoogleWorkspaceMCPClient:
         }
         return await self.call_tool_via_auth("get_gmail_thread_content", arguments, user_email)
     
+    async def get_gmail_threads_content_batch(self, thread_ids: List[str], format: str = "full", user_email: str = "") -> Dict[str, Any]:
+        """Get multiple Gmail threads content using MCP tools"""
+        arguments = {
+            "thread_ids": thread_ids,
+            "format": format
+        }
+        return await self.call_tool_via_auth("get_gmail_threads_content_batch", arguments, user_email)
+    
     async def list_gmail_labels(self, user_email: str = "") -> Dict[str, Any]:
         """List Gmail labels using MCP tools"""
         arguments = {}
@@ -321,6 +547,19 @@ class GoogleWorkspaceMCPClient:
             arguments["remove_label_ids"] = remove_label_ids
             
         return await self.call_tool_via_auth("modify_gmail_message_labels", arguments, user_email)
+    
+    async def batch_modify_gmail_message_labels(self, message_ids: List[str], add_label_ids: List[str] = None, 
+                                              remove_label_ids: List[str] = None, user_email: str = "") -> Dict[str, Any]:
+        """Batch modify Gmail message labels using MCP tools"""
+        arguments = {
+            "message_ids": message_ids
+        }
+        if add_label_ids:
+            arguments["add_label_ids"] = add_label_ids
+        if remove_label_ids:
+            arguments["remove_label_ids"] = remove_label_ids
+            
+        return await self.call_tool_via_auth("batch_modify_gmail_message_labels", arguments, user_email)
 
 # Global MCP client instance
 mcp_client = GoogleWorkspaceMCPClient()

@@ -29,26 +29,34 @@ class AIService:
     
     def create_system_prompt(self, user: User) -> str:
         """Create system prompt for the AI assistant"""
-        return f"""You are Rituo, a helpful AI assistant that can directly manage Google Workspace tools for authenticated users.
+        return f"""You are Rituo, an AI assistant that helps {user.name} manage their Google Workspace.
 
-You have DIRECT access to the following capabilities:
-- Google Calendar: Schedule, modify, and manage calendar events
-- Gmail: Send emails, read messages, manage labels  
-- Google Tasks: Create and manage task lists and tasks
+User: {user.name} ({user.email})
 
-User Information:
-- Name: {user.name}
-- Email: {user.email}
-- Status: ✅ Authenticated and ready to use Google Workspace
+Instructions:
+1. When users ask for actions (schedule meetings, send emails, create tasks), execute them using available tools
+2. Provide natural, conversational responses using the actual results from the tools
+3. Include useful details like event IDs or links only when they're actually provided by the tools
+4. Be helpful and friendly while being accurate about what actually happened
+5. If something fails, explain what went wrong in plain language
 
-IMPORTANT INSTRUCTIONS:
-1. The user is already authenticated - DO NOT ask for authentication or permissions
-2. When users request actions, execute them immediately using available tools
-3. Be concise and action-oriented - focus on results, not explanations
-4. For time-based requests, use the user's local timezone when possible
-5. Confirm successful actions with brief, helpful summaries
+Available capabilities:
+- Google Calendar: Create and manage events
+- Gmail: Send emails and search messages  
+- Google Tasks: Create and manage tasks
 
-Current conversation context will be provided with each message."""
+Response style:
+- Natural and conversational
+- Use actual results from tools
+- Include links/IDs only if provided
+- Be specific about what was accomplished
+
+Examples:
+User: "Schedule meeting tomorrow 2pm"
+Response: "I've scheduled your meeting for tomorrow at 2:00 PM. The event has been added to your calendar."
+
+User: "Send email to john@company.com"
+Response: "I've sent your email to john@company.com successfully."""
 
     async def process_message(
         self, 
@@ -138,10 +146,13 @@ Current conversation context will be provided with each message."""
             
             if intent_result:
                 if intent_result.get("success"):
-                    return f"✅ **Action Completed Successfully!**\n\n{intent_result.get('message', 'Action completed.')}\n\n{ai_response}"
+                    # Return ONLY the MCP tool result, not the AI response
+                    return intent_result.get('message', 'Action completed.')
                 else:
-                    return f"❌ **Action Failed:**\n{intent_result.get('error', 'Unknown error occurred')}\n\n{ai_response}"
+                    # Return ONLY the error, not the AI response
+                    return f"❌ {intent_result.get('error', 'Unknown error occurred')}"
             
+            # Only return AI response if no MCP action was taken
             return ai_response
             
         except Exception as e:
@@ -161,8 +172,12 @@ Current conversation context will be provided with each message."""
         if any(keyword in user_message_lower for keyword in ["schedule", "meeting", "appointment", "calendar", "event"]):
             return await self._execute_calendar_action(user_message, user, context)
         
-        # Email intent detection
-        elif any(keyword in user_message_lower for keyword in ["send email", "email", "compose", "mail"]):
+        # Email intent detection - enhanced patterns
+        elif (any(keyword in user_message_lower for keyword in ["send email", "send mail", "send a mail", "write email", "write mail", "write a mail", "compose"]) or
+              ("send" in user_message_lower and ("mail" in user_message_lower or "email" in user_message_lower)) or
+              ("send" in user_message_lower and ("to" in user_message_lower and "@" in user_message)) or
+              ("write" in user_message_lower and ("mail" in user_message_lower or "email" in user_message_lower)) or
+              ("list" in user_message_lower and ("mail" in user_message_lower or "email" in user_message_lower))):
             return await self._execute_email_action(user_message, user, context)
         
         # Tasks intent detection
@@ -237,7 +252,67 @@ Current conversation context will be provided with each message."""
             from datetime import datetime, timedelta
             import re
             
-            # Parse meeting details from user message
+            # Check if user wants to list/view events or calendars
+            if any(word in user_message.lower() for word in ["list", "show", "what", "check", "see", "look"]):
+                # Check if they want to list calendars specifically
+                if "calendar" in user_message.lower() and ("list" in user_message.lower() or "show" in user_message.lower()) and "event" not in user_message.lower():
+                    result = await mcp_client.list_calendars(user_email=user.email)
+                    
+                    if result.get("success"):
+                        calendars_data = result.get("result", "")
+                        
+                        # Ensure calendars_data is a string
+                        if not isinstance(calendars_data, str):
+                            calendars_data = str(calendars_data)
+                        
+                        return {
+                            "success": True,
+                            "message": f"Here are your available calendars:\n\n{calendars_data}"
+                        }
+                    else:
+                        error_msg = result.get("error", "Failed to get calendars")
+                        return {
+                            "success": False,
+                            "error": f"I couldn't get your calendars. {error_msg}"
+                        }
+                # Get date from message (tomorrow, today, specific date)
+                target_date = None
+                if "tomorrow" in user_message.lower():
+                    tomorrow = datetime.now() + timedelta(days=1)
+                    target_date = tomorrow.strftime("%Y-%m-%d")
+                elif "today" in user_message.lower():
+                    target_date = datetime.now().strftime("%Y-%m-%d")
+                
+                result = await mcp_client.get_calendar_events(
+                    time_min=target_date,
+                    time_max=None,  # Let mcp_client calculate the proper end time
+                    max_results=10,
+                    user_email=user.email
+                )
+                
+                if result.get("success"):
+                    events_data = result.get("result", "")
+                    
+                    # Ensure events_data is a string
+                    if not isinstance(events_data, str):
+                        events_data = str(events_data)
+                    
+                    # Format the events data for better readability
+                    formatted_events = self._format_calendar_events(events_data)
+                    
+                    date_label = "tomorrow" if target_date and "tomorrow" in user_message.lower() else "today" if target_date and "today" in user_message.lower() else "for the specified date"
+                    return {
+                        "success": True,
+                        "message": f"📅 **Calendar Events {date_label.title()}**\n\n{formatted_events}"
+                    }
+                else:
+                    error_msg = result.get("error", "Failed to get calendar events")
+                    return {
+                        "success": False,
+                        "error": f"I couldn't get your calendar events. {error_msg}"
+                    }
+            
+            # Parse meeting details from user message for creating events
             title = "New Meeting"
             start_time = None
             attendees = []
@@ -273,12 +348,46 @@ Current conversation context will be provided with each message."""
             )
             
             if result.get("success"):
+                # Create natural response using actual MCP result
+                mcp_result = result.get("result", "")
+                
+                # Ensure mcp_result is a string
+                if not isinstance(mcp_result, str):
+                    mcp_result = str(mcp_result)
+                
+                # Check if the result contains a link
+                # Format the calendar response nicely
+                import re
+                link_match = re.search(r'Link:\s*(https?://[^\s]+)', mcp_result)
+                event_id_match = re.search(r'ID:\s*([^\s,]+)', mcp_result)
+                
+                natural_response = f"📅 **Meeting Scheduled Successfully!**\n\n"
+                natural_response += f"**Event:** {title}\n"
+                natural_response += f"**Date:** {start_time.strftime('%B %d, %Y')}\n"
+                natural_response += f"**Time:** {start_time.strftime('%I:%M %p')}\n"
+                
+                if link_match:
+                    natural_response += f"**Calendar Link:** [Open in Google Calendar]({link_match.group(1)})\n"
+                if event_id_match:
+                    natural_response += f"**Event ID:** `{event_id_match.group(1)}`"
+                
                 return {
                     "success": True,
-                    "message": f"📅 **Event Created:** {title}\n⏰ **Time:** {start_time.strftime('%Y-%m-%d at %I:%M %p')}\n👥 **Attendees:** {', '.join(attendees) if attendees else 'None'}"
+                    "message": natural_response
                 }
             else:
-                return result
+                error_msg = result.get("error", "Failed to create calendar event")
+                return {
+                    "success": False,
+                    "error": f"I couldn't create the meeting. {error_msg}"
+                }
+            
+            # Check for delete/cancel requests  
+            if any(word in user_message.lower() for word in ["delete", "cancel", "remove"]):
+                return {
+                    "success": False,
+                    "error": "To delete calendar events, I need the specific event ID. You can get event IDs by listing your events first, then use 'delete event with ID [event_id]' or delete them directly in Google Calendar."
+                }
                 
         except Exception as e:
             logger.error(f"Error executing calendar action: {e}")
@@ -294,8 +403,8 @@ Current conversation context will be provided with each message."""
                 to, subject, body = self._parse_email_send_request(user_message)
                 
                 if to and subject and body:
-                    result = await mcp_client.send_gmail_message(
-                        to=to,
+                    result = await mcp_client.send_email(
+                        to=to,  # send_email expects a string
                         subject=subject,
                         body=body,
                         user_email=user.email
@@ -304,10 +413,22 @@ Current conversation context will be provided with each message."""
                     if result.get("success"):
                         return {
                             "success": True,
-                            "message": f"📧 **Email Sent Successfully!**\n{result.get('result', 'Email sent.')}"
+                            "message": f"I've sent your email to {to} successfully."
                         }
                     else:
-                        return result
+                        error_msg = result.get("error", "Failed to send email")
+                        
+                        # Check if it's a permission issue
+                        if "insufficient" in error_msg.lower() or "authentication" in error_msg.lower() or "403" in error_msg:
+                            return {
+                                "success": False,
+                                "error": f"🚫 **Gmail Send Permission Missing**\n\n📧 **The Issue:** Your current authentication only includes Gmail *read* permissions, but sending emails requires Gmail *send* permissions.\n\n🔧 **Quick Fix:**\n1. **Clear your current session:** Go to [Google Account Settings](https://myaccount.google.com/permissions)\n2. **Remove 'Rituo' app access** (this clears old permissions)\n3. **Re-login to Rituo** - you'll be prompted for Gmail send permissions\n4. **Grant all Gmail permissions** when prompted\n\n💡 **Why this happens:** Google separates read and send permissions for security. You initially logged in with read-only access.\n\n🏢 **Corporate accounts:** If you're using a company Google Workspace account, contact your IT administrator to enable Gmail API access."
+                            }
+                        else:
+                            return {
+                                "success": False,
+                                "error": f"❌ **Email Send Failed**\n\n{error_msg}"
+                            }
                 else:
                     # If parsing failed, search recent emails instead
                     result = await mcp_client.search_gmail_messages(
@@ -317,9 +438,15 @@ Current conversation context will be provided with each message."""
                     )
                     
                     if result.get("success"):
+                        email_results = result.get('result', 'No unread emails found.')
+                        
+                        # Ensure email_results is a string
+                        if not isinstance(email_results, str):
+                            email_results = str(email_results)
+                            
                         return {
                             "success": True,
-                            "message": f"📧 **Recent Unread Emails:**\n{result.get('result', 'No unread emails found.')}\n\n💡 To send an email, please specify: recipient, subject, and message content."
+                            "message": f"Here are your recent unread emails:\n\n{email_results}"
                         }
                     else:
                         return result
@@ -335,9 +462,15 @@ Current conversation context will be provided with each message."""
                 )
                 
                 if result.get("success"):
+                    email_results = result.get('result', 'No emails found.')
+                    
+                    # Ensure email_results is a string
+                    if not isinstance(email_results, str):
+                        email_results = str(email_results)
+                        
                     return {
                         "success": True,
-                        "message": f"📧 **Email Search Results:**\n{result.get('result', 'No emails found.')}"
+                        "message": f"Here's what I found in your emails:\n\n{email_results}"
                     }
                 else:
                     return result
@@ -349,19 +482,46 @@ Current conversation context will be provided with each message."""
                 result = await mcp_client.draft_gmail_message(
                     subject=subject or "Draft",
                     body=body or "Draft message created via AI assistant",
-                    to=to,
+                    to=[to] if to else [],
                     user_email=user.email
                 )
                 
                 if result.get("success"):
                     return {
                         "success": True,
-                        "message": f"📧 **Draft Created Successfully!**\n{result.get('result', 'Draft created.')}"
+                        "message": f"I've created a draft email for you. You can find it in your Gmail drafts."
                     }
                 else:
-                    return result
+                    error_msg = result.get("error", "Failed to create draft")
+                    return {
+                        "success": False,
+                        "error": f"I couldn't create the draft. {error_msg}"
+                    }
+            elif "label" in user_message.lower():
+                if "list" in user_message.lower() or "show" in user_message.lower():
+                    # List Gmail labels
+                    result = await mcp_client.list_gmail_labels(user_email=user.email)
+                    
+                    if result.get("success"):
+                        labels_data = result.get('result', 'No labels found.')
+                        
+                        # Ensure labels_data is a string
+                        if not isinstance(labels_data, str):
+                            labels_data = str(labels_data)
+                            
+                        return {
+                            "success": True,
+                            "message": f"Here are your Gmail labels:\n\n{labels_data}"
+                        }
+                    else:
+                        return result
+                else:
+                    return {
+                        "success": False,
+                        "error": "I can help you list Gmail labels. Try 'show my email labels'."
+                    }
             else:
-                return {"success": False, "error": "Email action not recognized. I can help you send emails, search emails, or create drafts."}
+                return {"success": False, "error": "Email action not recognized. I can help you send emails, search emails, create drafts, or manage labels."}
                 
         except Exception as e:
             logger.error(f"Error executing email action: {e}")
@@ -385,27 +545,206 @@ Current conversation context will be provided with each message."""
                 )
                 
                 if result.get("success"):
+                    # Extract task ID from result if available
+                    task_result = result.get("result", "")
+                    task_id_match = None
+                    if isinstance(task_result, str):
+                        import re
+                        task_id_match = re.search(r'ID:\s*([^\s,]+)', task_result)
+                    
+                    response = f"✅ **Task Created Successfully!**\n\n"
+                    response += f"**Task:** {title}\n"
+                    response += f"**Status:** Pending\n"
+                    if task_id_match:
+                        response += f"**Task ID:** `{task_id_match.group(1)}`"
+                    
                     return {
                         "success": True,
-                        "message": f"✅ **Task Created:** {title}\n📝 **Notes:** Created via AI assistant"
+                        "message": response
                     }
                 else:
-                    return result
+                    error_msg = result.get("error", "Failed to create task")
+                    return {
+                        "success": False,
+                        "error": f"I couldn't create the task. {error_msg}"
+                    }
                     
             elif "list" in user_message.lower() or "show" in user_message.lower():
                 result = await mcp_client.list_tasks(
-                    task_list="@default",
+                    task_list_id=None,  # Will auto-detect default
                     max_results=10,
                     user_email=user.email
                 )
                 
                 if result.get("success"):
+                    task_results = result.get('result', 'No tasks found.')
+                    
+                    # Ensure task_results is a string
+                    if not isinstance(task_results, str):
+                        task_results = str(task_results)
+                    
+                    # Format the tasks for better readability
+                    formatted_tasks = self._format_task_list(task_results)
+                        
                     return {
                         "success": True,
-                        "message": f"✅ **Your Tasks:**\n{result.get('result', 'No tasks found.')}"
+                        "message": f"✅ **Your Tasks**\n\n{formatted_tasks}"
                     }
                 else:
                     return result
+                    
+            elif "delete" in user_message.lower() or "remove" in user_message.lower():
+                # Extract task ID from the message
+                import re
+                
+                # Look for task ID patterns
+                id_patterns = [
+                    r'(?:id|ID)\s*[:\[\(]?\s*([a-zA-Z0-9_-]+)',  # "id: xyz" or "ID [xyz]"
+                    r'task\s+([a-zA-Z0-9_-]+)',  # "task xyz"
+                    r'([a-zA-Z0-9_-]{10,})'  # Long alphanumeric strings (likely IDs)
+                ]
+                
+                task_id = None
+                task_list_id = None
+                
+                for pattern in id_patterns:
+                    match = re.search(pattern, user_message)
+                    if match:
+                        task_id = match.group(1)
+                        break
+                
+                if task_id:
+                    # Get default task list ID first
+                    try:
+                        task_lists_result = await mcp_client.get_default_task_list(user_email=user.email)
+                        if task_lists_result.get("success") and "result" in task_lists_result:
+                            import re
+                            id_match = re.search(r"ID:\s*([\w-]+)", task_lists_result["result"])
+                            if id_match:
+                                task_list_id = id_match.group(1)
+                            else:
+                                task_list_id = "@default"
+                        else:
+                            task_list_id = "@default"
+                    except Exception as e:
+                        logger.warning(f"Failed to get default task list, using @default: {e}")
+                        task_list_id = "@default"
+                    
+                    # Try to delete the task
+                    result = await mcp_client.delete_task(
+                        task_list_id=task_list_id,
+                        task_id=task_id,
+                        user_email=user.email
+                    )
+                    
+                    if result.get("success"):
+                        return {
+                            "success": True,
+                            "message": f"🗑️ **Task Deleted Successfully!**\n\nTask with ID `{task_id}` has been removed from your task list."
+                        }
+                    else:
+                        error_msg = result.get("error", "Failed to delete task")
+                        return {
+                            "success": False,
+                            "error": f"I couldn't delete the task. {error_msg}"
+                        }
+                else:
+                    return {
+                        "success": False,
+                        "error": "I need the specific task ID to delete it. You can get task IDs by listing your tasks first."
+                    }
+                
+            elif "update" in user_message.lower() or "modify" in user_message.lower() or "change" in user_message.lower():
+                # Extract task info from the message
+                import re
+                
+                # Try to parse: 'update "taskname" to "newtaskname"'
+                update_pattern = r'update\s*["\']?([^"\']+?)["\']?\s*to\s*["\']?([^"\']+)["\']?'
+                match = re.search(update_pattern, user_message, re.IGNORECASE)
+                
+                if match:
+                    old_task_name = match.group(1).strip()
+                    new_task_name = match.group(2).strip()
+                    
+                    # First, list tasks to find the task ID by name
+                    task_list_result = await mcp_client.list_tasks(
+                        task_list_id=None,  # Auto-detect default
+                        max_results=50,
+                        user_email=user.email
+                    )
+                    
+                    if task_list_result.get("success"):
+                        tasks_data = task_list_result.get("result", "")
+                        
+                        # Find task ID by matching the old task name
+                        task_id = None
+                        task_list_id = None
+                        
+                        # Look for the task name in the result
+                        if old_task_name.lower() in tasks_data.lower():
+                            # Extract task ID from the text
+                            lines = tasks_data.split('\n')
+                            for i, line in enumerate(lines):
+                                if old_task_name.lower() in line.lower():
+                                    # Look for ID in the same line or next line
+                                    id_match = re.search(r'ID:\s*([a-zA-Z0-9_-]+)', line)
+                                    if not id_match and i + 1 < len(lines):
+                                        id_match = re.search(r'ID:\s*([a-zA-Z0-9_-]+)', lines[i + 1])
+                                    if id_match:
+                                        task_id = id_match.group(1)
+                                        break
+                        
+                        if task_id:
+                            # Get default task list ID
+                            try:
+                                task_lists_result = await mcp_client.get_default_task_list(user_email=user.email)
+                                if task_lists_result.get("success") and "result" in task_lists_result:
+                                    import re
+                                    id_match = re.search(r"ID:\s*([\w-]+)", task_lists_result["result"])
+                                    if id_match:
+                                        task_list_id = id_match.group(1)
+                                    else:
+                                        task_list_id = "@default"
+                                else:
+                                    task_list_id = "@default"
+                            except Exception as e:
+                                logger.warning(f"Failed to get default task list, using @default: {e}")
+                                task_list_id = "@default"
+                            
+                            # Update the task
+                            result = await mcp_client.update_task(
+                                task_list_id=task_list_id,
+                                task_id=task_id,
+                                title=new_task_name,
+                                user_email=user.email
+                            )
+                            
+                            if result.get("success"):
+                                return {
+                                    "success": True,
+                                    "message": f"✏️ **Task Updated Successfully!**\n\n**Old Name:** {old_task_name}\n**New Name:** {new_task_name}\n**Task ID:** `{task_id}`"
+                                }
+                            else:
+                                error_msg = result.get("error", "Failed to update task")
+                                return {
+                                    "success": False,
+                                    "error": f"I couldn't update the task. {error_msg}"
+                                }
+                        else:
+                            return {
+                                "success": False,
+                                "error": f"I couldn't find a task named '{old_task_name}'. Please check the task name and try again."
+                            }
+                    else:
+                        return {
+                            "success": False,
+                            "error": "I couldn't list your tasks to find the one to update."
+                        }
+                else:
+                    return {
+                        "success": False,
+                        "error": "Please use the format: 'update \"old task name\" to \"new task name\"' or provide the task ID."
+                    }
             else:
                 return {"success": False, "error": "Task action not recognized"}
                 
@@ -417,32 +756,33 @@ Current conversation context will be provided with each message."""
         """Extract task title from user message"""
         import re
         
-        # Look for patterns like "create a task to X" or "add task X"  
+        # Comprehensive patterns for task title extraction
         patterns = [
-            r'(?:create|add).*?task.*?to\s+(.*?)(?:\s|$)',
-            r'(?:create|add).*?task.*?:\s+(.*?)(?:\s|$)',
-            r'(?:create|add).*?task\s+(.*?)(?:\s|$)',
-            r'task.*?to\s+(.*?)(?:\s|$)',
+            # "add a new task as sleep at 11 pm today"
+            r'(?:create|add|make).*?(?:new\s+)?task\s+as\s+(.*?)(?:\s*$)',
+            # "create a task to do something"
+            r'(?:create|add|make).*?task.*?to\s+(.*?)(?:\s*$)',
+            # "add task: something" 
+            r'(?:create|add|make).*?task.*?:\s*(.*?)(?:\s*$)',
+            # "add task something"
+            r'(?:create|add|make).*?task\s+(.*?)(?:\s*$)',
+            # "task for something"
+            r'task.*?(?:for|to|about)\s+(.*?)(?:\s*$)',
+            # "new task something"
+            r'new\s+task\s+(.*?)(?:\s*$)',
+            # Generic "add something" (when in task context)
+            r'(?:create|add|make)\s+(.*?)(?:\s*$)',
         ]
         
         for pattern in patterns:
-            match = re.search(pattern, user_message.lower())
+            match = re.search(pattern, user_message, re.IGNORECASE)
             if match:
                 title = match.group(1).strip()
-                # Capitalize first letter
-                return title.capitalize()
-        
-        # Fallback to extracting everything after common task creation words
-        fallback_patterns = [
-            r'(?:create|add|make).*?(?:task|todo|reminder).*?(?:for|to|about)\s+(.*)',
-            r'(?:task|todo|reminder).*?(?:for|to|about)\s+(.*)'
-        ]
-        
-        for pattern in fallback_patterns:
-            match = re.search(pattern, user_message.lower())
-            if match:
-                title = match.group(1).strip()
-                return title.capitalize()
+                # Remove quotes if present
+                title = re.sub(r'^["\']|["\']$', '', title)
+                # Don't return if it's too generic or empty
+                if title and len(title.strip()) > 2 and title.lower() not in ['task', 'todo', 'reminder']:
+                    return title.strip()
         
         # Final fallback
         return "New Task via AI Assistant"
@@ -607,16 +947,33 @@ Current conversation context will be provided with each message."""
         
         # Try to extract email components using various patterns
         to_match = re.search(r'(?:to|send.*?to)\s+([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})', user_message.lower())
-        subject_match = re.search(r'(?:subject|title|about)(?:\s+is)?[:\s]+(.+?)(?:\s+body|\s+message|\s+saying|$)', user_message, re.IGNORECASE)
-        body_match = re.search(r'(?:body|message|saying|tell them|content)[:\s]+(.+)', user_message, re.IGNORECASE)
         
-        # Alternative patterns for body
-        if not body_match:
-            body_match = re.search(r'"([^"]+)"', user_message)  # Text in quotes
+        # More flexible patterns for subject and body
+        subject_match = re.search(r'(?:subject|title|about)(?:\s+is)?[:\s]+(.+?)(?:\s+body|\s+message|\s+saying|$)', user_message, re.IGNORECASE)
+        
+        # Try multiple patterns for body/message content
+        body_patterns = [
+            r'(?:saying|tell them|message is|body is|content is)[:\s]+"([^"]+)"',  # "saying 'message'"
+            r'(?:saying|tell them|message)[:\s]+(.+?)(?:\.|$)',  # "saying message"
+            r'as\s+"([^"]+)"',  # "as 'message'"
+            r'as\s+([^"\']+?)(?:\s*$)',  # "as message"
+            r'"([^"]+)"',  # Just text in quotes
+            r'\'([^\']+)\'',  # Text in single quotes
+        ]
+        
+        body_match = None
+        for pattern in body_patterns:
+            body_match = re.search(pattern, user_message, re.IGNORECASE)
+            if body_match:
+                break
         
         to = to_match.group(1) if to_match else None
         subject = subject_match.group(1).strip() if subject_match else None
         body = body_match.group(1).strip() if body_match else None
+        
+        # If no explicit subject but we have a body, use a default subject
+        if to and body and not subject:
+            subject = "Message from Rituo"
         
         # Clean up subject and body
         if subject:
@@ -625,6 +982,74 @@ Current conversation context will be provided with each message."""
             body = body.strip('"\'')
             
         return to, subject, body
+    
+    def _format_calendar_events(self, events_data: str) -> str:
+        """Format calendar events for better readability"""
+        if "No events found" in events_data:
+            return "📭 No events scheduled"
+        
+        import re
+        
+        # Extract individual events using regex
+        event_pattern = r'"([^"]+)"\s*\(Starts:\s*([^,]+),\s*Ends:\s*([^)]+)\)\s*ID:\s*([^\s|]+)(?:\s*\|\s*Link:\s*([^\s]+))?'
+        events = re.findall(event_pattern, events_data)
+        
+        if not events:
+            # Fallback to original format if parsing fails
+            return events_data
+        
+        formatted = []
+        for i, (title, start, end, event_id, link) in enumerate(events, 1):
+            # Parse and format the datetime
+            try:
+                from datetime import datetime
+                start_dt = datetime.fromisoformat(start.replace('T', ' ').replace('+05:30', ''))
+                end_dt = datetime.fromisoformat(end.replace('T', ' ').replace('+05:30', ''))
+                
+                time_str = f"{start_dt.strftime('%I:%M %p')} - {end_dt.strftime('%I:%M %p')}"
+                date_str = start_dt.strftime('%B %d, %Y')
+                
+                event_str = f"**{i}. {title}**\n"
+                event_str += f"   📅 {date_str}\n"
+                event_str += f"   🕐 {time_str}\n"
+                if link:
+                    event_str += f"   🔗 [Open in Calendar]({link})\n"
+                
+                formatted.append(event_str)
+            except:
+                # Fallback if datetime parsing fails
+                formatted.append(f"**{i}. {title}**\n   📅 {start} - {end}\n")
+        
+        return "\n".join(formatted)
+    
+    def _format_task_list(self, task_data: str) -> str:
+        """Format task list for better readability"""
+        if "No tasks found" in task_data or not task_data.strip():
+            return "📝 No tasks found"
+        
+        import re
+        
+        # Extract individual tasks using regex
+        task_pattern = r'([^\n\r]+)\s*\(ID:\s*([^)]+)\)\s*Status:\s*([^\n\r]+)\s*Notes:\s*([^\n\r]*)\s*Updated:\s*([^\n\r]*)'
+        tasks = re.findall(task_pattern, task_data)
+        
+        if not tasks:
+            # Fallback to original format if parsing fails
+            return task_data
+        
+        formatted = []
+        for i, (title, task_id, status, notes, updated) in enumerate(tasks, 1):
+            status_emoji = "✅" if status.strip().lower() == "completed" else "📝"
+            
+            task_str = f"{status_emoji} **{i}. {title.strip()}**\n"
+            task_str += f"   📋 Status: {status.strip()}\n"
+            if notes.strip() and notes.strip() != "Created via AI assistant":
+                task_str += f"   📄 Notes: {notes.strip()}\n"
+            task_str += f"   🆔 ID: `{task_id.strip()}`\n"
+            
+            formatted.append(task_str)
+        
+        return "\n".join(formatted)
     
     def _extract_email_search_query(self, user_message: str) -> str:
         """Extract email search query from user message"""
