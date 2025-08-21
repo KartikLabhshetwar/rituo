@@ -1,9 +1,11 @@
 """
-FastAPI application for Rituo - Google Workspace AI Assistant
-This runs the REST API for the frontend, separate from the MCP server
+Rituo Unified Server - Handles both FastAPI and MCP in one process
+Clean, maintainable architecture with Google Workspace AI Assistant
 """
+import asyncio
 import logging
 import os
+import threading
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from fastapi import FastAPI
@@ -21,9 +23,6 @@ from api.auth_routes import router as auth_router
 from api.chat_routes import router as chat_router
 from api.ai_routes import router as ai_router
 
-# Import MCP client for AI service
-from services.mcp_client import initialize_mcp_client, cleanup_mcp_client
-
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -31,44 +30,80 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Global variable to hold MCP server
+mcp_server = None
+
+def start_mcp_server():
+    """Start MCP server in background thread"""
+    global mcp_server
+    try:
+        from server import server, configure_server_for_http, set_transport_mode
+        
+        # Configure MCP server for HTTP
+        set_transport_mode("streamable-http")
+        configure_server_for_http()
+        
+        # Run MCP server on port 8001
+        mcp_port = int(os.getenv("PORT", 8001))
+        logger.info(f"Starting MCP server on port {mcp_port}")
+        
+        # Run in background thread
+        def run_mcp():
+            server.run(transport="streamable-http", port=mcp_port, host="0.0.0.0")
+        
+        mcp_thread = threading.Thread(target=run_mcp, daemon=True)
+        mcp_thread.start()
+        logger.info("✅ MCP server started in background")
+        
+    except Exception as e:
+        logger.error(f"Failed to start MCP server: {e}")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager"""
     # Startup
-    logger.info("Starting Rituo FastAPI application")
+    logger.info("🚀 Starting Rituo Unified Server")
     try:
         # Connect to MongoDB
         await connect_to_mongo()
-        logger.info("Connected to MongoDB")
+        logger.info("✅ Connected to MongoDB")
         
-        # Initialize MCP client
+        # Start MCP server in background
+        start_mcp_server()
+        
+        # Wait a moment for MCP server to start
+        await asyncio.sleep(2)
+        
+        # Initialize MCP client connection
+        from services.mcp_client import initialize_mcp_client
         await initialize_mcp_client()
-        logger.info("Initialized MCP client")
+        logger.info("✅ MCP client connected")
         
     except Exception as e:
-        logger.error(f"Error during startup: {e}")
+        logger.error(f"❌ Error during startup: {e}")
         raise
     
     yield
     
     # Shutdown
-    logger.info("Shutting down Rituo FastAPI application")
+    logger.info("🛑 Shutting down Rituo Unified Server")
     try:
         # Cleanup MCP client
+        from services.mcp_client import cleanup_mcp_client
         await cleanup_mcp_client()
-        logger.info("Cleaned up MCP client")
+        logger.info("✅ MCP client cleaned up")
         
         # Close MongoDB connection
         await close_mongo_connection()
-        logger.info("Closed MongoDB connection")
+        logger.info("✅ MongoDB connection closed")
         
     except Exception as e:
-        logger.error(f"Error during shutdown: {e}")
+        logger.error(f"❌ Error during shutdown: {e}")
 
-# Create FastAPI app
+# Create unified FastAPI app
 app = FastAPI(
-    title="Rituo API",
-    description="AI Assistant for Google Workspace",
+    title="Rituo - Google Workspace AI Assistant",
+    description="Unified server with FastAPI + MCP for Google Workspace integration",
     version="1.0.0",
     lifespan=lifespan
 )

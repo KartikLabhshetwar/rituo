@@ -1,53 +1,49 @@
 """
-MCP Client to connect FastAPI server with FastMCP Google Workspace tools via HTTP
+MCP Client to connect FastAPI server with FastMCP Google Workspace tools
+Uses proper FastMCP Client for MCP protocol communication
 """
 import asyncio
 import logging
-import httpx
-import json
+import os
 from typing import Optional, Dict, Any, List
+from fastmcp import Client
+from fastmcp.client.auth import BearerAuth
 
 logger = logging.getLogger(__name__)
 
 class GoogleWorkspaceMCPClient:
     """
-    MCP Client to interface with Google Workspace FastMCP server via HTTP
-    This allows the FastAPI application to use MCP tools
+    Proper MCP Client to interface with Google Workspace FastMCP server
+    Uses FastMCP Client for protocol-compliant communication
     """
     
-    def __init__(self, mcp_server_url: str = "http://localhost:8001"):
+    def __init__(self, mcp_server_url: str = "http://localhost:8001/mcp"):
         self.server_url = mcp_server_url
-        self.client: Optional[httpx.AsyncClient] = None
+        self.client: Optional[Client] = None
         self.connected = False
         self.available_tools = []
         
     async def connect_to_server(self):
-        """Connect to the Google Workspace MCP server via HTTP"""
+        """Connect to the Google Workspace MCP server using proper MCP protocol"""
         try:
-            self.client = httpx.AsyncClient(timeout=30.0)
+            # Create FastMCP client - no auth needed as we'll handle auth per-request
+            self.client = Client(self.server_url)
             
-            # Test connection by checking health
-            response = await self.client.get(f"{self.server_url}/health")
-            if response.status_code == 200:
-                self.connected = True
-                logger.info(f"Connected to MCP server at {self.server_url}")
+            # Test connection with ping
+            async with self.client:
+                await self.client.ping()
                 
-                # Try to get available tools (this might not be directly available via HTTP)
-                # We'll define the known tools based on our server configuration
+                # Get available tools from the MCP server
+                tools = await self.client.list_tools()
                 self.available_tools = [
-                    {"name": "gmail_send", "description": "Send an email via Gmail"},
-                    {"name": "gmail_search", "description": "Search emails in Gmail"},
-                    {"name": "calendar_search", "description": "Search calendar events"},
-                    {"name": "calendar_create_event", "description": "Create a calendar event"},
-                    {"name": "tasks_list", "description": "List tasks"},
-                    {"name": "tasks_create", "description": "Create a new task"},
+                    {"name": tool.name, "description": tool.description or ""}
+                    for tool in tools
                 ]
                 
-                logger.info(f"MCP server connected with tools: {[tool['name'] for tool in self.available_tools]}")
+                self.connected = True
+                logger.info(f"Connected to MCP server at {self.server_url}")
+                logger.info(f"Available MCP tools: {[tool['name'] for tool in self.available_tools]}")
                 return True
-            else:
-                logger.error(f"Failed to connect to MCP server: HTTP {response.status_code}")
-                return False
                 
         except Exception as e:
             logger.error(f"Failed to connect to MCP server: {e}")
@@ -56,8 +52,6 @@ class GoogleWorkspaceMCPClient:
     
     async def disconnect(self):
         """Disconnect from the MCP server"""
-        if self.client:
-            await self.client.aclose()
         self.connected = False
         logger.info("Disconnected from MCP server")
     
@@ -67,110 +61,69 @@ class GoogleWorkspaceMCPClient:
     
     async def call_tool_via_auth(self, tool_name: str, arguments: Dict[str, Any], user_email: str) -> Dict[str, Any]:
         """
-        Call a Google Workspace tool through the FastMCP server via HTTP
+        Call a Google Workspace tool through the FastMCP server using proper MCP protocol
         """
         if not self.connected or not self.client:
             raise Exception("Not connected to MCP server")
         
         try:
-            logger.info(f"Calling FastMCP tool: {tool_name} with args: {arguments} for user: {user_email}")
+            logger.info(f"Calling MCP tool: {tool_name} with args: {arguments} for user: {user_email}")
             
-            # FastMCP exposes tools at /tools/{tool_name}
-            endpoint = f"{self.server_url}/tools/{tool_name}"
-            
-            # Prepare the request payload - FastMCP expects arguments plus any context
-            payload = {
+            # Add user email to arguments as expected by MCP tools
+            tool_arguments = {
                 **arguments,
-                "user_google_email": user_email  # This is the parameter name the tools expect
+                "user_google_email": user_email
             }
             
-            logger.info(f"Calling endpoint: {endpoint} with payload: {payload}")
-            
-            response = await self.client.post(
-                endpoint,
-                json=payload,
-                headers={
-                    "Content-Type": "application/json",
-                    "Accept": "application/json"
+            # Use proper MCP client to call tool
+            async with self.client:
+                result = await self.client.call_tool(tool_name, tool_arguments)
+                
+                logger.info(f"✅ Successfully called {tool_name} via MCP protocol")
+                return {
+                    "success": True,
+                    "tool_name": tool_name,
+                    "result": result,
+                    "arguments": arguments
                 }
-            )
+                
+        except Exception as e:
+            logger.error(f"Error calling MCP tool {tool_name}: {e}")
             
-            logger.info(f"Response status: {response.status_code}")
-            
-            if response.status_code == 200:
-                try:
-                    result = response.json()
-                    logger.info(f"✅ Successfully called {tool_name} via FastMCP")
-                    return {
-                        "success": True,
-                        "tool_name": tool_name,
-                        "result": result,
-                        "arguments": arguments
-                    }
-                except Exception as json_error:
-                    # Sometimes FastMCP returns plain text
-                    result_text = response.text
-                    logger.info(f"✅ FastMCP returned text response: {result_text[:200]}...")
-                    return {
-                        "success": True,
-                        "tool_name": tool_name,
-                        "result": result_text,
-                        "arguments": arguments
-                    }
-            elif response.status_code == 404:
-                logger.error(f"Tool {tool_name} not found on FastMCP server")
+            # Handle specific error types
+            if "authentication" in str(e).lower() or "unauthorized" in str(e).lower():
+                return {
+                    "success": False,
+                    "tool_name": tool_name,
+                    "error": f"Authentication required for {tool_name}. Please ensure Google OAuth is configured.",
+                    "arguments": arguments,
+                    "auth_required": True
+                }
+            elif "not found" in str(e).lower():
                 return {
                     "success": False,
                     "tool_name": tool_name,
                     "error": f"Tool '{tool_name}' not found on MCP server",
                     "arguments": arguments
                 }
-            elif response.status_code == 401:
-                logger.error(f"Authentication required for tool {tool_name}")
-                return {
-                    "success": False,
-                    "tool_name": tool_name,
-                    "error": f"Authentication required for {tool_name}. Please authenticate with Google first.",
-                    "arguments": arguments,
-                    "auth_required": True
-                }
             else:
-                error_text = response.text
-                logger.error(f"Tool {tool_name} returned status {response.status_code}: {error_text}")
                 return {
                     "success": False,
                     "tool_name": tool_name,
-                    "error": f"HTTP {response.status_code}: {error_text}",
+                    "error": str(e),
                     "arguments": arguments
                 }
-                
-        except httpx.RequestError as e:
-            logger.error(f"Request failed for {tool_name}: {e}")
-            return {
-                "success": False,
-                "tool_name": tool_name,
-                "error": f"Network error calling MCP server: {str(e)}",
-                "arguments": arguments
-            }
-        except Exception as e:
-            logger.error(f"Error calling tool {tool_name}: {e}")
-            return {
-                "success": False,
-                "tool_name": tool_name,
-                "error": str(e),
-                "arguments": arguments
-            }
     
     async def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """Call a specific MCP tool with arguments - simplified version"""
         return await self.call_tool_via_auth(tool_name, arguments, "default_user")
     
-    async def search_calendar_events(self, query: str = "", max_results: int = 10) -> Dict[str, Any]:
+    async def search_calendar_events(self, query: str = "", max_results: int = 10, user_email: str = "") -> Dict[str, Any]:
         """Search calendar events using MCP tools"""
-        return await self.call_tool("calendar_search", {
+        return await self.call_tool_via_auth("search_events", {
             "query": query,
             "max_results": max_results
-        })
+        }, user_email)
     
     async def create_calendar_event(self, title: str, start_time: str, end_time: str, 
                                   description: str = "", attendees: List[str] = None, user_email: str = "") -> Dict[str, Any]:
@@ -203,25 +156,23 @@ class GoogleWorkspaceMCPClient:
             "page_size": max_results
         }
         return await self.call_tool_via_auth("search_gmail_messages", arguments, user_email)
-        return await self.call_tool("gmail_search", {
-            "query": query,
-            "max_results": max_results
-        })
     
-    async def create_task(self, title: str, notes: str = "", due_date: str = None) -> Dict[str, Any]:
+    async def create_task(self, title: str, notes: str = "", due_date: str = None, user_email: str = "") -> Dict[str, Any]:
         """Create a task using MCP tools"""
-        return await self.call_tool("tasks_create", {
+        arguments = {
             "title": title,
             "notes": notes,
             "due": due_date
-        })
+        }
+        return await self.call_tool_via_auth("create_task", arguments, user_email)
     
-    async def list_tasks(self, task_list: str = "@default", max_results: int = 20) -> Dict[str, Any]:
+    async def list_tasks(self, task_list: str = "@default", max_results: int = 20, user_email: str = "") -> Dict[str, Any]:
         """List tasks using MCP tools"""
-        return await self.call_tool("tasks_list", {
+        arguments = {
             "task_list": task_list,
             "max_results": max_results
-        })
+        }
+        return await self.call_tool_via_auth("list_tasks", arguments, user_email)
 
 # Global MCP client instance
 mcp_client = GoogleWorkspaceMCPClient()

@@ -129,90 +129,84 @@ Current conversation context will be provided with each message."""
     ) -> str:
         """
         Process AI response and determine if MCP tools should be used
-        This is where we'll integrate with your existing MCP tools
+        Uses intelligent intent detection to automatically execute actions
         """
         try:
             user_message_lower = user_message.lower()
             
-            # Check for execution triggers
-            execution_triggers = [
-                "yes", "do it", "go ahead", "proceed", "run", "execute", 
-                "mcp server", "google calendar", "add the event", "create the event",
-                "schedule it", "make it happen"
-            ]
+            # Detect intent and automatically execute appropriate MCP tools
+            intent_result = await self._detect_and_execute_intent(user_message, user, context)
             
-            is_execution_request = any(trigger in user_message_lower for trigger in execution_triggers)
-            
-            # Calendar-related keywords
-            calendar_keywords = [
-                "schedule", "meeting", "appointment", "calendar", "event", 
-                "book", "reserve", "plan", "arrange", "tomorrow", "today", "time"
-            ]
-            
-            # Gmail-related keywords
-            email_keywords = [
-                "email", "mail", "send", "message", "compose", "reply", "inbox"
-            ]
-            
-            # Tasks-related keywords
-            task_keywords = [
-                "task", "todo", "reminder", "list", "complete", "finish"
-            ]
-            
-            # If this is an execution request and we detect intent, actually call MCP tools
-            if is_execution_request:
-                
-                # Calendar execution
-                if any(keyword in user_message_lower for keyword in calendar_keywords):
-                    logger.info("Executing calendar action via MCP server")
-                    result = await self._execute_calendar_action(user_message, user, context)
-                    if result.get("success"):
-                        return f"✅ **Calendar Event Created Successfully!**\n\n{result.get('message', 'Event has been added to your Google Calendar.')}\n\n{ai_response}"
-                    else:
-                        return f"❌ **Calendar Action Failed:**\n{result.get('error', 'Unknown error occurred')}\n\n{ai_response}"
-                
-                # Email execution  
-                elif any(keyword in user_message_lower for keyword in email_keywords):
-                    logger.info("Executing email action via MCP server")
-                    result = await self._execute_email_action(user_message, user, context)
-                    if result.get("success"):
-                        return f"✅ **Email Action Completed!**\n\n{result.get('message', 'Email action completed successfully.')}\n\n{ai_response}"
-                    else:
-                        return f"❌ **Email Action Failed:**\n{result.get('error', 'Unknown error occurred')}\n\n{ai_response}"
-                
-                # Task execution
-                elif any(keyword in user_message_lower for keyword in task_keywords):
-                    logger.info("Executing task action via MCP server")
-                    result = await self._execute_task_action(user_message, user, context)
-                    if result.get("success"):
-                        return f"✅ **Task Action Completed!**\n\n{result.get('message', 'Task action completed successfully.')}\n\n{ai_response}"
-                    else:
-                        return f"❌ **Task Action Failed:**\n{result.get('error', 'Unknown error occurred')}\n\n{ai_response}"
-
-            mcp_actions = []
-            
-            # Check for calendar actions
-            if any(keyword in user_message_lower for keyword in calendar_keywords):
-                mcp_actions.append(self._suggest_calendar_action(user_message, user))
-            
-            # Check for email actions
-            if any(keyword in user_message_lower for keyword in email_keywords):
-                mcp_actions.append(self._suggest_email_action(user_message, user))
-            
-            # Check for task actions
-            if any(keyword in user_message_lower for keyword in task_keywords):
-                mcp_actions.append(self._suggest_task_action(user_message, user))
-            
-            # If MCP actions are suggested, append them to the response
-            if mcp_actions:
-                action_text = "\n\n🔧 **Available Actions:**\n" + "\n".join(filter(None, mcp_actions))
-                return ai_response + action_text
+            if intent_result:
+                if intent_result.get("success"):
+                    return f"✅ **Action Completed Successfully!**\n\n{intent_result.get('message', 'Action completed.')}\n\n{ai_response}"
+                else:
+                    return f"❌ **Action Failed:**\n{intent_result.get('error', 'Unknown error occurred')}\n\n{ai_response}"
             
             return ai_response
             
         except Exception as e:
             logger.error(f"Error processing MCP tools: {e}")
-            return ai_response  # Return original response if MCP processing fails
+            return ai_response
+    
+    async def _detect_and_execute_intent(self, user_message: str, user: User, context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Detect user intent and automatically execute appropriate MCP tools
+        """
+        import re
+        from datetime import datetime, timedelta
+        
+        user_message_lower = user_message.lower()
+        
+        # Calendar intent detection
+        if any(keyword in user_message_lower for keyword in ["schedule", "meeting", "appointment", "calendar", "event"]):
+            return await self._execute_calendar_action(user_message, user, context)
+        
+        # Email intent detection
+        elif any(keyword in user_message_lower for keyword in ["send email", "email", "compose", "mail"]):
+            return await self._execute_email_action(user_message, user, context)
+        
+        # Tasks intent detection
+        elif any(keyword in user_message_lower for keyword in ["create task", "add task", "task", "todo", "reminder"]):
+            return await self._execute_task_action(user_message, user, context)
+        
+        # Calendar search intent
+        elif any(keyword in user_message_lower for keyword in ["what meetings", "check calendar", "calendar today", "schedule today"]):
+            return await self._execute_calendar_search(user_message, user, context)
+        
+        return None
+    
+    async def _execute_calendar_search(self, user_message: str, user: User, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute calendar search via MCP server"""
+        try:
+            # Determine search parameters based on message
+            query = ""
+            if "today" in user_message.lower():
+                from datetime import datetime
+                today = datetime.now().strftime("%Y-%m-%d")
+                query = f"after:{today}"
+            elif "tomorrow" in user_message.lower():
+                from datetime import datetime, timedelta
+                tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+                query = f"after:{tomorrow}"
+            
+            result = await mcp_client.search_calendar_events(
+                query=query,
+                max_results=10,
+                user_email=user.email
+            )
+            
+            if result.get("success"):
+                return {
+                    "success": True,
+                    "message": f"📅 **Calendar Search Results:**\n{result.get('result', 'No events found.')}"
+                }
+            else:
+                return result
+                
+        except Exception as e:
+            logger.error(f"Error executing calendar search: {e}")
+            return {"success": False, "error": str(e)}
     
     def _suggest_calendar_action(self, user_message: str, user: User) -> Optional[str]:
         """Suggest calendar-related MCP actions"""
@@ -241,7 +235,6 @@ Current conversation context will be provided with each message."""
     async def _execute_calendar_action(self, user_message: str, user: User, context: Dict[str, Any]) -> Dict[str, Any]:
         """Execute calendar actions via MCP server"""
         try:
-            # Simple parsing for calendar events - can be enhanced with NLP
             from datetime import datetime, timedelta
             import re
             
@@ -254,7 +247,7 @@ Current conversation context will be provided with each message."""
             meeting_match = re.search(r'meeting with (.+?)(?:\s|$|at|tomorrow|today)', user_message.lower())
             if meeting_match:
                 title = f"Meeting with {meeting_match.group(1).title()}"
-                attendees = [meeting_match.group(1).lower()]
+                # Don't add attendees for now, as we need proper email parsing
             
             # Extract time info
             tomorrow_match = re.search(r'tomorrow.*?(\d{1,2}(?::\d{2})?\s*(?:am|pm))', user_message.lower())
@@ -262,7 +255,6 @@ Current conversation context will be provided with each message."""
             
             if tomorrow_match:
                 time_str = tomorrow_match.group(1)
-                # Parse time and set for tomorrow
                 tomorrow = datetime.now() + timedelta(days=1)
                 # Simple time parsing - enhance as needed
                 if '2 pm' in time_str.lower() or '2pm' in time_str.lower():
@@ -281,17 +273,13 @@ Current conversation context will be provided with each message."""
             end_time = start_time + timedelta(hours=1)  # Default 1-hour meeting
             
             # Call MCP server to create calendar event
-            result = await self.execute_mcp_action(
-                "calendar_create",
-                {
-                    "title": title,
-                    "start_time": start_time.isoformat(),
-                    "end_time": end_time.isoformat(),
-                    "description": f"Meeting scheduled via AI assistant",
-                    "attendees": attendees,
-                    "location": ""
-                },
-                user
+            result = await mcp_client.create_calendar_event(
+                title=title,
+                start_time=start_time.isoformat(),
+                end_time=end_time.isoformat(),
+                description="Meeting scheduled via AI assistant",
+                attendees=attendees,
+                user_email=user.email
             )
             
             if result.get("success"):
@@ -309,28 +297,36 @@ Current conversation context will be provided with each message."""
     async def _execute_email_action(self, user_message: str, user: User, context: Dict[str, Any]) -> Dict[str, Any]:
         """Execute email actions via MCP server"""
         try:
-            # Simple email parsing - enhance as needed
             if "send" in user_message.lower():
-                return await self.execute_mcp_action(
-                    "email_send",
-                    {
-                        "to": "",  # Would need better parsing
-                        "subject": "Email via AI Assistant",
-                        "body": "This email was sent via the AI assistant.",
-                        "cc": "",
-                        "bcc": ""
-                    },
-                    user
+                # For now, just search emails as sending requires more complex parsing
+                result = await mcp_client.search_emails(
+                    query="is:unread",
+                    max_results=5,
+                    user_email=user.email
                 )
+                
+                if result.get("success"):
+                    return {
+                        "success": True,
+                        "message": f"📧 **Recent Unread Emails:**\n{result.get('result', 'No unread emails found.')}"
+                    }
+                else:
+                    return result
+                    
             elif "search" in user_message.lower() or "check" in user_message.lower():
-                return await self.execute_mcp_action(
-                    "email_search", 
-                    {
-                        "query": "is:unread",
-                        "max_results": 10
-                    },
-                    user
+                result = await mcp_client.search_emails(
+                    query="is:unread",
+                    max_results=10,
+                    user_email=user.email
                 )
+                
+                if result.get("success"):
+                    return {
+                        "success": True,
+                        "message": f"📧 **Email Search Results:**\n{result.get('result', 'No emails found.')}"
+                    }
+                else:
+                    return result
             else:
                 return {"success": False, "error": "Email action not recognized"}
                 
@@ -342,32 +338,41 @@ Current conversation context will be provided with each message."""
         """Execute task actions via MCP server"""
         try:
             logger.info(f"_execute_task_action called with message: {user_message}")
+            
             if "create" in user_message.lower() or "add" in user_message.lower():
-                # Parse task title from message - extract actual title
+                # Parse task title from message
                 title = self._extract_task_title(user_message)
                 logger.info(f"Parsed task title: {title}")
-                # Simple parsing - can be enhanced
-                result = await self.execute_mcp_action(
-                    "task_create",
-                    {
-                        "task_list_id": "@default",
-                        "title": title,
-                        "notes": "Created via AI assistant",
-                        "due_date": None
-                    },
-                    user
+                
+                result = await mcp_client.create_task(
+                    title=title,
+                    notes="Created via AI assistant",
+                    due_date=None,
+                    user_email=user.email
                 )
-                logger.info(f"MCP action result: {result}")
-                return result
+                
+                if result.get("success"):
+                    return {
+                        "success": True,
+                        "message": f"✅ **Task Created:** {title}\n📝 **Notes:** Created via AI assistant"
+                    }
+                else:
+                    return result
+                    
             elif "list" in user_message.lower() or "show" in user_message.lower():
-                return await self.execute_mcp_action(
-                    "task_list",
-                    {
-                        "task_list_id": "@default",
-                        "max_results": 10
-                    },
-                    user
+                result = await mcp_client.list_tasks(
+                    task_list="@default",
+                    max_results=10,
+                    user_email=user.email
                 )
+                
+                if result.get("success"):
+                    return {
+                        "success": True,
+                        "message": f"✅ **Your Tasks:**\n{result.get('result', 'No tasks found.')}"
+                    }
+                else:
+                    return result
             else:
                 return {"success": False, "error": "Task action not recognized"}
                 
@@ -408,112 +413,6 @@ Current conversation context will be provided with each message."""
         
         # Final fallback
         return "New Task via AI Assistant"
-
-    async def execute_mcp_action(self, action_type: str, params: Dict[str, Any], user: User) -> Dict[str, Any]:
-        """
-        Execute MCP tool actions based on user requests
-        """
-        try:
-            logger.info(f"execute_mcp_action called: action_type={action_type}, params={params}, user_email={user.email}")
-            
-            if not mcp_client.connected:
-                logger.error("MCP client not connected")
-                return {
-                    "success": False,
-                    "error": "MCP client not connected. Please ensure the Google Workspace server is running."
-                }
-            
-            logger.info("MCP client is connected, proceeding with action")
-            
-            # Use the authenticated user's email for all MCP calls
-            user_email = user.email
-            
-            if action_type == "calendar_search":
-                return await mcp_client.call_tool_via_auth(
-                    "calendar_search",
-                    {
-                        "query": params.get("query", ""),
-                        "max_results": params.get("max_results", 10),
-                        "time_min": params.get("time_min"),
-                        "time_max": params.get("time_max")
-                    },
-                    user_email
-                )
-            
-            elif action_type == "calendar_create":
-                return await mcp_client.call_tool_via_auth(
-                    "create_event",  # Use the actual FastMCP tool name
-                    {
-                        "summary": params.get("title", ""),
-                        "start_time": params.get("start_time", ""),
-                        "end_time": params.get("end_time", ""),
-                        "description": params.get("description", ""),
-                        "attendees": params.get("attendees", []),
-                        "location": params.get("location", "")
-                    },
-                    user_email
-                )
-            
-            elif action_type == "email_send":
-                return await mcp_client.call_tool_via_auth(
-                    "send_gmail_message",  # Use the actual FastMCP tool name
-                    {
-                        "to": params.get("to", ""),
-                        "subject": params.get("subject", ""),
-                        "body": params.get("body", ""),
-                        "cc": params.get("cc", ""),
-                        "bcc": params.get("bcc", "")
-                    },
-                    user_email
-                )
-            
-            elif action_type == "email_search":
-                return await mcp_client.call_tool_via_auth(
-                    "search_gmail_messages",  # Use the actual FastMCP tool name
-                    {
-                        "query": params.get("query", ""),
-                        "page_size": params.get("max_results", 10)
-                    },
-                    user_email
-                )
-            
-            elif action_type == "task_create":
-                logger.info(f"Calling MCP client for task_create with params: {params}")
-                result = await mcp_client.call_tool_via_auth(
-                    "tasks_create",
-                    {
-                        "task_list_id": params.get("task_list_id", "@default"),
-                        "title": params.get("title", ""),
-                        "notes": params.get("notes", ""),
-                        "due": params.get("due_date")
-                    },
-                    user_email
-                )
-                logger.info(f"MCP client returned result: {result}")
-                return result
-            
-            elif action_type == "task_list":
-                return await mcp_client.call_tool_via_auth(
-                    "tasks_list",
-                    {
-                        "task_list_id": params.get("task_list_id", "@default"),
-                        "max_results": params.get("max_results", 20)
-                    },
-                    user_email
-                )
-            
-            else:
-                return {
-                    "success": False,
-                    "error": f"Unknown action type: {action_type}"
-                }
-                
-        except Exception as e:
-            logger.error(f"Error executing MCP action {action_type}: {e}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
 
 # Global AI service instance
 ai_service = AIService()

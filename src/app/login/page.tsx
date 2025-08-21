@@ -161,7 +161,7 @@ export default function Login() {
       return
     }
 
-    // Direct redirect to Google OAuth instead of using Google Identity Services
+    // Direct redirect to Google OAuth for MCP server
     const redirectUri = 'http://localhost:8001/oauth2callback'
     const scope = 'openid email profile https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/tasks'
     

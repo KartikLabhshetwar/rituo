@@ -254,12 +254,7 @@ try:
 except ImportError as e:
     logger.warning(f"Failed to load Google Tasks tools: {e}")
 
-try:
-    from core.comments import register_comment_tools
-    register_comment_tools()
-    logger.info("Loaded comment tools")
-except ImportError as e:
-    logger.warning(f"Failed to load comment tools: {e}")
+# Comment tools removed - keeping only Calendar, Tasks, Gmail
 
 # --- Tools ---
 @server.tool()

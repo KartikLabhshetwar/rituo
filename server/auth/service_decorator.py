@@ -8,15 +8,8 @@ from google.auth.exceptions import RefreshError
 from auth.google_auth import get_authenticated_google_service, GoogleAuthenticationError
 from auth.scopes import (
     GMAIL_READONLY_SCOPE, GMAIL_SEND_SCOPE, GMAIL_COMPOSE_SCOPE, GMAIL_MODIFY_SCOPE, GMAIL_LABELS_SCOPE,
-    DRIVE_READONLY_SCOPE, DRIVE_FILE_SCOPE,
-    DOCS_READONLY_SCOPE, DOCS_WRITE_SCOPE,
     CALENDAR_READONLY_SCOPE, CALENDAR_EVENTS_SCOPE,
-    SHEETS_READONLY_SCOPE, SHEETS_WRITE_SCOPE,
-    CHAT_READONLY_SCOPE, CHAT_WRITE_SCOPE, CHAT_SPACES_SCOPE,
-    FORMS_BODY_SCOPE, FORMS_BODY_READONLY_SCOPE, FORMS_RESPONSES_READONLY_SCOPE,
-    SLIDES_SCOPE, SLIDES_READONLY_SCOPE,
     TASKS_SCOPE, TASKS_READONLY_SCOPE,
-    CUSTOM_SEARCH_SCOPE
 )
 
 # OAuth 2.1 integration is now handled by FastMCP auth
@@ -94,42 +87,19 @@ SCOPE_GROUPS = {
     "gmail_modify": GMAIL_MODIFY_SCOPE,
     "gmail_labels": GMAIL_LABELS_SCOPE,
 
-    # Drive scopes
-    "drive_read": DRIVE_READONLY_SCOPE,
-    "drive_file": DRIVE_FILE_SCOPE,
 
-    # Docs scopes
-    "docs_read": DOCS_READONLY_SCOPE,
-    "docs_write": DOCS_WRITE_SCOPE,
 
     # Calendar scopes
     "calendar_read": CALENDAR_READONLY_SCOPE,
     "calendar_events": CALENDAR_EVENTS_SCOPE,
 
-    # Sheets scopes
-    "sheets_read": SHEETS_READONLY_SCOPE,
-    "sheets_write": SHEETS_WRITE_SCOPE,
 
-    # Chat scopes
-    "chat_read": CHAT_READONLY_SCOPE,
-    "chat_write": CHAT_WRITE_SCOPE,
-    "chat_spaces": CHAT_SPACES_SCOPE,
-
-    # Forms scopes
-    "forms": FORMS_BODY_SCOPE,
-    "forms_read": FORMS_BODY_READONLY_SCOPE,
-    "forms_responses_read": FORMS_RESPONSES_READONLY_SCOPE,
-
-    # Slides scopes
-    "slides": SLIDES_SCOPE,
-    "slides_read": SLIDES_READONLY_SCOPE,
 
     # Tasks scopes
     "tasks": TASKS_SCOPE,
     "tasks_read": TASKS_READONLY_SCOPE,
 
-    # Custom Search scope
-    "customsearch": CUSTOM_SEARCH_SCOPE,
+
 }
 
 # Service cache: {cache_key: (service, cached_time, user_email)}
