@@ -19,16 +19,18 @@ export function StatsSection() {
   ]
 
   return (
-    <SwissSection background="muted">
-      <SwissContainer>
-        <SwissGrid columns={3} gap="lg">
-          {stats.map((stat, index) => (
-            <div key={index} className="text-center space-y-2">
-              <SwissHeading level={2}>{stat.value}</SwissHeading>
-              <SwissText color="muted">{stat.label}</SwissText>
-            </div>
-          ))}
-        </SwissGrid>
+    <SwissSection background="muted" className="py-20">
+      <SwissContainer maxWidth="full">
+        <div className="max-w-6xl mx-auto">
+          <SwissGrid columns={3} gap="lg">
+            {stats.map((stat, index) => (
+              <div key={index} className="text-center space-y-4 py-8">
+                <SwissHeading level={2} className="text-4xl font-bold">{stat.value}</SwissHeading>
+                <SwissText color="muted" className="text-lg">{stat.label}</SwissText>
+              </div>
+            ))}
+          </SwissGrid>
+        </div>
       </SwissContainer>
     </SwissSection>
   )

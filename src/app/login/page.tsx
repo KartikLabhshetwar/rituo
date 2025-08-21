@@ -6,31 +6,10 @@ import { SwissContainer, SwissCard, SwissHeading, SwissText } from "@/components
 import { SwissButton } from "@/components/ui/swiss-button"
 import { Bot, ArrowLeft, Shield, CheckCircle2 } from 'lucide-react'
 
-interface GoogleConfig {
-  client_id: string;
-  callback: (response: { credential: string }) => void;
-  auto_select: boolean;
-  cancel_on_tap_outside: boolean;
-}
-
-declare global {
-  interface Window {
-    google: {
-      accounts: {
-        id: {
-          initialize: (config: GoogleConfig) => void
-          prompt: () => void
-        }
-      }
-    }
-  }
-}
-
 export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
   const [clientId, setClientId] = useState('')
-  const [isGoogleLoaded, setIsGoogleLoaded] = useState(false)
   const router = useRouter()
 
   useEffect(() => {
@@ -60,87 +39,42 @@ export default function LoginPage() {
     fetchClientId()
   }, [router])
 
-  useEffect(() => {
-    if (!clientId) return
-
-    const handleGoogleResponse = async (response: { credential: string }) => {
-      setIsLoading(true)
-      setError('')
-
-      try {
-        // Send the credential to your backend for verification
-        const authResponse = await fetch('http://localhost:8000/api/auth/google', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            credential: response.credential
-          })
-        })
-
-        if (authResponse.ok) {
-          const data = await authResponse.json()
-          
-          // Store tokens and user data
-          localStorage.setItem('access_token', data.access_token)
-          localStorage.setItem('refresh_token', data.refresh_token)
-          localStorage.setItem('user', JSON.stringify(data.user))
-          
-          // Redirect to chat (API key setup will be handled there)
-          router.push('/chat')
-        } else {
-          const errorData = await authResponse.json()
-          throw new Error(errorData.detail || 'Authentication failed')
-        }
-      } catch (error) {
-        console.error('Authentication error:', error)
-        setError(error instanceof Error ? error.message : 'Authentication failed')
-      } finally {
-        setIsLoading(false)
-      }
-    }
-
-    // Load Google Identity Services script
-    const loadGoogleScript = () => {
-      if (document.getElementById('google-identity-script')) {
-        initializeGoogle()
-        return
-      }
-
-      const script = document.createElement('script')
-      script.id = 'google-identity-script'
-      script.src = 'https://accounts.google.com/gsi/client'
-      script.async = true
-      script.defer = true
-      script.onload = initializeGoogle
-      document.head.appendChild(script)
-    }
-
-    const initializeGoogle = () => {
-      if (typeof window !== 'undefined' && window.google) {
-        window.google.accounts.id.initialize({
-          client_id: clientId,
-          callback: handleGoogleResponse,
-          auto_select: false,
-          cancel_on_tap_outside: false
-        })
-        setIsGoogleLoaded(true)
-      }
-    }
-
-    loadGoogleScript()
-  }, [clientId, router])
-
-
+  const generateOAuthURL = () => {
+    if (!clientId) return '#'
+    
+    const baseURL = 'https://accounts.google.com/o/oauth2/v2/auth'
+    const params = new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: `http://localhost:8001/oauth2callback`,
+      response_type: 'code',
+      scope: [
+        'openid',
+        'email',
+        'profile',
+        'https://www.googleapis.com/auth/calendar',
+        'https://www.googleapis.com/auth/gmail.readonly',
+        'https://www.googleapis.com/auth/gmail.send',
+        'https://www.googleapis.com/auth/tasks'
+      ].join(' '),
+      access_type: 'offline',
+      prompt: 'select_account consent' // This forces account selection
+    })
+    
+    return `${baseURL}?${params.toString()}`
+  }
 
   const handleGoogleLogin = () => {
-    if (window.google && isGoogleLoaded) {
-      setError('')
-      window.google.accounts.id.prompt()
-    } else {
-      setError('Google authentication not loaded. Please refresh the page.')
+    if (!clientId) {
+      setError('Google authentication not ready. Please refresh the page.')
+      return
     }
+    
+    setIsLoading(true)
+    setError('')
+    
+    // Redirect to Google OAuth
+    const oauthURL = generateOAuthURL()
+    window.location.href = oauthURL
   }
 
   const handleBackToHome = () => {
@@ -197,7 +131,7 @@ export default function LoginPage() {
                 size="lg"
                 className="w-full"
                 onClick={handleGoogleLogin}
-                disabled={isLoading || !isGoogleLoaded}
+                disabled={isLoading || !clientId}
               >
                 {isLoading ? (
                   <div className="w-5 h-5 border-2 border-background border-t-transparent rounded-full animate-spin" />

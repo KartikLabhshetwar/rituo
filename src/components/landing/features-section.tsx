@@ -23,14 +23,14 @@ export function FeaturesSection() {
   ]
 
   return (
-    <SwissSection background="muted">
-      <SwissContainer>
-        <div className="text-center space-y-12">
-          <div className="space-y-4">
-            <SwissHeading level={2} align="center">
+    <SwissSection background="muted" className="py-24">
+      <SwissContainer maxWidth="full">
+        <div className="text-center space-y-16 max-w-7xl mx-auto">
+          <div className="space-y-6">
+            <SwissHeading level={2} align="center" className="text-4xl">
               Work smarter, not harder
             </SwissHeading>
-            <SwissText size="lg" color="muted" className="max-w-2xl mx-auto">
+            <SwissText size="xl" color="muted" className="max-w-3xl mx-auto text-xl leading-relaxed">
               Stop juggling apps and interfaces. Just tell me what you need to get done.
             </SwissText>
           </div>
@@ -39,13 +39,13 @@ export function FeaturesSection() {
             {features.map((feature, index) => {
               const IconComponent = feature.icon
               return (
-                <SwissCard key={index} variant="outlined" className="text-center space-y-4">
-                  <div className="w-12 h-12 bg-foreground rounded-sm flex items-center justify-center mx-auto">
-                    <IconComponent className="w-6 h-6 text-background" />
+                <SwissCard key={index} variant="outlined" className="text-center space-y-6 p-8 h-full">
+                  <div className="w-16 h-16 bg-foreground rounded-sm flex items-center justify-center mx-auto">
+                    <IconComponent className="w-8 h-8 text-background" />
                   </div>
-                  <div className="space-y-2">
-                    <SwissHeading level={4}>{feature.title}</SwissHeading>
-                    <SwissText size="sm" color="muted">
+                  <div className="space-y-3">
+                    <SwissHeading level={4} className="text-xl">{feature.title}</SwissHeading>
+                    <SwissText size="sm" color="muted" className="text-base leading-relaxed">
                       {feature.description}
                     </SwissText>
                   </div>
