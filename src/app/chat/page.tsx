@@ -186,7 +186,7 @@ export default function Chat() {
               </div>
               <div>
                 <h1 className="text-lg font-semibold tracking-tight">Rituo</h1>
-                <p className="text-xs text-muted-foreground">Google Workspace Assistant</p>
+                <p className="text-xs text-muted-foreground">Your Productivity Assistant</p>
               </div>
             </div>
             
@@ -230,25 +230,27 @@ export default function Chat() {
                       <Bot className="w-8 h-8 text-muted-foreground" />
                     </div>
                     
-                    <div className="space-y-3 max-w-md">
+                    <div className="space-y-3 max-w-lg">
                       <h2 className="text-xl font-semibold tracking-tight">
-                        Ready to assist
+                        Your productivity assistant is ready
                       </h2>
                       <p className="text-muted-foreground text-sm leading-relaxed">
-                        I can help you manage your Google Calendar, Gmail, and Tasks. 
-                        Ask me anything about your workspace.
+                        Everything you need is just a conversation away. I&apos;ll help you stay organized, 
+                        manage your time, and get things done across your Google Workspace.
                       </p>
                     </div>
 
-                    <div className="grid gap-2 w-full max-w-sm text-sm">
+                    <div className="grid gap-3 w-full max-w-lg text-sm">
                       <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                        Try asking:
+                        What can I help you with?
                       </div>
-                      <div className="space-y-1 text-muted-foreground">
-                        <div>• Schedule a meeting tomorrow at 2 PM</div>
-                        <div>• What meetings do I have today?</div>
-                        <div>• Create a task to review proposals</div>
-                        <div>• Send an email to the team</div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-muted-foreground">
+                        <div>📅 &quot;What&apos;s my schedule today?&quot;</div>
+                        <div>✉️ &quot;Send recap email to team&quot;</div>
+                        <div>📝 &quot;Add task: Call client at 3pm&quot;</div>
+                        <div>🔍 &quot;Find emails from last week&quot;</div> 
+                        <div>⏰ &quot;Schedule 1:1 with Sarah tomorrow&quot;</div>
+                        <div>✅ &quot;Mark proposal task as done&quot;</div>
                       </div>
                     </div>
                   </div>
@@ -304,7 +306,7 @@ export default function Chat() {
                 className="w-full"
               >
                 <PromptInputTextarea
-                  placeholder="Ask me to schedule meetings, check calendar, manage tasks..."
+                  placeholder="What would you like to get done today? (e.g., schedule meeting, send email, add task...)"
                   className="min-h-[52px] resize-none border-0 shadow-none focus-visible:ring-0 text-sm"
                 />
                 <PromptInputActions className="p-2">

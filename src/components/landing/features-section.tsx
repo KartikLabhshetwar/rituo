@@ -7,18 +7,18 @@ export function FeaturesSection() {
   const features = [
     {
       icon: Calendar,
-      title: "Smart Calendar",
-      description: "Schedule meetings, manage events, and stay organized with intelligent calendar automation."
+      title: "Time Management",
+      description: "\"Schedule my 1:1s for next week\" - Just tell me what you need and I'll handle your calendar instantly."
     },
     {
       icon: Mail,
-      title: "Email Management", 
-      description: "Compose, send, and organize emails with AI-powered assistance and smart filtering."
+      title: "Email Made Simple", 
+      description: "\"Send a follow-up to yesterday's meeting\" - Compose, send, and organize emails through natural conversation."
     },
     {
       icon: CheckSquare,
-      title: "Task Automation",
-      description: "Create, update, and track tasks seamlessly across all your Google Workspace tools."
+      title: "Task Mastery",
+      description: "\"Add a task to call the client tomorrow\" - Create, update, and track everything you need to get done."
     }
   ]
 
@@ -28,10 +28,10 @@ export function FeaturesSection() {
         <div className="text-center space-y-12">
           <div className="space-y-4">
             <SwissHeading level={2} align="center">
-              Everything you need
+              Work smarter, not harder
             </SwissHeading>
             <SwissText size="lg" color="muted" className="max-w-2xl mx-auto">
-              Powerful integrations designed with Swiss precision and minimalist philosophy.
+              Stop juggling apps and interfaces. Just tell me what you need to get done.
             </SwissText>
           </div>
 

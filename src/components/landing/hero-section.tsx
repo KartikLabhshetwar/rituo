@@ -16,14 +16,14 @@ export function HeroSection({ isAuthenticated, onGetStarted }: HeroSectionProps)
         <div className="text-center space-y-8">
           <div className="space-y-4">
             <SwissHeading level={1} align="center" className="max-w-4xl mx-auto">
-              Your AI-Powered
+              Everything You Need Is
               <br />
-              <span className="text-muted-foreground">Google Workspace Assistant</span>
+              <span className="text-muted-foreground">Just a Conversation Away</span>
             </SwissHeading>
             
             <SwissText size="xl" color="muted" className="max-w-2xl mx-auto">
-              Streamline your productivity with intelligent automation for Calendar, Gmail, and Tasks. 
-              Swiss precision meets artificial intelligence.
+              Your intelligent productivity assistant. Schedule meetings, manage emails, track tasks, 
+              and stay organized—all through simple conversation.
             </SwissText>
           </div>
 
