@@ -1,8 +1,9 @@
 "use client"
 
 import { useState, useEffect } from 'react'
-import { Button } from '@/components/ui/button'
+import { SwissButton } from '@/components/ui/swiss-button'
 import { useRouter } from 'next/navigation'
+import { ApiKeySetup } from '@/components/ui/api-key-setup'
 import { 
   ChatContainerRoot, 
   ChatContainerContent, 
@@ -19,7 +20,7 @@ import {
   PromptInputActions,
   PromptInputAction 
 } from '@/components/ui/prompt-input'
-import { Send, Bot } from 'lucide-react'
+import { Send, Bot, Key, LogOut, Loader2 } from 'lucide-react'
 
 interface ChatMessage {
   id: string
@@ -28,31 +29,37 @@ interface ChatMessage {
   timestamp: string
 }
 
-export default function ChatTest() {
+export default function Chat() {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [chatId, setChatId] = useState('')
-  const [user, setUser] = useState<any>(null)
+  const [user, setUser] = useState<{ name: string; email: string } | null>(null)
   const [accessToken, setAccessToken] = useState<string | null>(null)
+  const [showApiKeySetup, setShowApiKeySetup] = useState(false)
+  const [hasApiKey, setHasApiKey] = useState(false)
   const router = useRouter()
 
-  // Check authentication and create chat session on mount
+  // Check authentication and API key on mount
   useEffect(() => {
     const token = localStorage.getItem('access_token')
     const userData = localStorage.getItem('user')
+    const apiKey = localStorage.getItem('groq_api_key')
     
     if (!token || !userData) {
-      // Redirect to login if not authenticated
       router.push('/login')
       return
     }
     
     setAccessToken(token)
     setUser(JSON.parse(userData))
+    setHasApiKey(!!apiKey)
     
-    // Create a new chat session
-    createChatSession(token)
+    if (!apiKey) {
+      setShowApiKeySetup(true)
+    } else {
+      createChatSession(token)
+    }
   }, [router])
 
   const createChatSession = async (token: string) => {
@@ -71,16 +78,11 @@ export default function ChatTest() {
       if (response.ok) {
         const chatSession = await response.json()
         setChatId(chatSession.id)
-        console.log('Chat session created:', chatSession.id)
       } else {
-        // Fallback to generated ID if API fails
         setChatId(`chat_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`)
-        console.warn('Failed to create chat session, using fallback ID')
       }
-    } catch (error) {
-      // Fallback to generated ID if API fails
+    } catch {
       setChatId(`chat_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`)
-      console.warn('Error creating chat session, using fallback ID:', error)
     }
   }
 
@@ -99,12 +101,13 @@ export default function ChatTest() {
     setIsLoading(true)
 
     try {
-      // Call the AI API (with proper authentication)
+      const apiKey = localStorage.getItem('groq_api_key')
       const response = await fetch('http://localhost:8000/api/ai/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${accessToken}`,
+          'X-Groq-API-Key': apiKey || '', // Send user's API key
         },
         body: JSON.stringify({
           message: userMessage.content,
@@ -131,7 +134,7 @@ export default function ChatTest() {
       console.error('Error sending message:', error)
       const errorMessage: ChatMessage = {
         id: `error_${Date.now()}`,
-        content: `Sorry, I encountered an error: ${error instanceof Error ? error.message : 'Unknown error'}. Make sure the server is running on http://localhost:8000`,
+        content: `Sorry, I encountered an error: ${error instanceof Error ? error.message : 'Unknown error'}. Please check your API key and try again.`,
         role: 'assistant',
         timestamp: new Date().toISOString()
       }
@@ -145,139 +148,197 @@ export default function ChatTest() {
     localStorage.removeItem('access_token')
     localStorage.removeItem('refresh_token') 
     localStorage.removeItem('user')
+    localStorage.removeItem('groq_api_key')
     router.push('/login')
+  }
+
+  const handleApiKeySetupComplete = () => {
+    setShowApiKeySetup(false)
+    setHasApiKey(true)
+    if (accessToken) {
+      createChatSession(accessToken)
+    }
+  }
+
+  // Show API key setup if needed
+  if (showApiKeySetup) {
+    return <ApiKeySetup onComplete={handleApiKeySetupComplete} />
   }
 
   // Show loading while checking authentication
   if (!user || !accessToken) {
     return (
       <div className="flex items-center justify-center h-screen">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+        <Loader2 className="w-8 h-8 animate-spin" />
       </div>
     )
   }
 
   return (
-    <div className="flex flex-col h-screen max-w-4xl mx-auto">
-      {/* Header */}
-      <div className="border-b p-4">
-        <h1 className="text-2xl font-bold">Chat - Google Calendar Assistant</h1>
-        <div className="flex items-center justify-between">
-          <p className="text-muted-foreground">
-            Welcome {user?.name}! I can help you with Google Calendar, Gmail, and Tasks
-          </p>
-          <Button variant="outline" size="sm" onClick={handleLogout}>
-            Logout
-          </Button>
-        </div>
-        <p className="text-sm text-muted-foreground mt-1">
-          Chat ID: {chatId}
-        </p>
-      </div>
-
-      {/* Chat Container */}
-      <div className="flex-1 overflow-hidden">
-        <ChatContainerRoot className="h-full p-4">
-          <ChatContainerContent>
-            {messages.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full text-center space-y-4">
-                <div className="text-muted-foreground">
-                  <Bot size={48} />
-                </div>
-                <div>
-                  <h3 className="text-lg font-semibold">Start a conversation</h3>
-                  <p className="text-muted-foreground">
-                    Try asking me to schedule a meeting, check your calendar, or manage your tasks!
-                  </p>
-                </div>
-                <div className="text-sm text-muted-foreground space-y-1">
-                  <p>• &quot;Schedule a meeting with John tomorrow at 2 PM&quot;</p>
-                  <p>• &quot;What meetings do I have today?&quot;</p>
-                  <p>• &quot;Create a task to review the project proposal&quot;</p>
-                </div>
+    <div className="flex flex-col h-screen bg-background">
+      {/* Header - Swiss Design: Clean, minimal, functional */}
+      <header className="border-b border-border bg-background/80 backdrop-blur-sm sticky top-0 z-10">
+        <div className="max-w-4xl mx-auto px-4 py-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 bg-foreground rounded-sm flex items-center justify-center">
+                <Bot className="w-5 h-5 text-background" />
               </div>
-            ) : (
-              <div className="space-y-4">
-                {messages.map((message) => (
-                  <Message key={message.id}>
-                    <MessageAvatar
-                      src={message.role === 'user' ? '' : ''}
-                      alt={message.role === 'user' ? 'User' : 'Assistant'}
-                      fallback={message.role === 'user' ? 'U' : 'AI'}
-                    />
-                    <MessageContent
-                      markdown={message.role === 'assistant'}
-                      className={
-                        message.role === 'user' 
-                          ? 'bg-primary text-primary-foreground' 
-                          : 'bg-secondary'
-                      }
-                    >
-                      {message.content}
-                    </MessageContent>
-                  </Message>
-                ))}
-                
-                {isLoading && (
-                  <Message>
-                    <MessageAvatar
-                      src=""
-                      alt="Assistant"
-                      fallback="AI"
-                    />
-                    <MessageContent markdown={false} className="bg-secondary">
-                      <div className="flex items-center space-x-2">
-                        <div className="animate-pulse">Thinking...</div>
+              <div>
+                <h1 className="text-lg font-semibold tracking-tight">Rituo</h1>
+                <p className="text-xs text-muted-foreground">Google Workspace Assistant</p>
+              </div>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              <SwissButton
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowApiKeySetup(true)}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <Key className="w-4 h-4" />
+              </SwissButton>
+              <SwissButton
+                variant="ghost"
+                size="sm"
+                onClick={handleLogout}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <LogOut className="w-4 h-4" />
+              </SwissButton>
+            </div>
+          </div>
+          
+          {user && (
+            <div className="mt-2 text-xs text-muted-foreground">
+              {user.name} • {hasApiKey ? '🟢 API Key Active' : '🔴 No API Key'}
+            </div>
+          )}
+        </div>
+      </header>
+
+      {/* Main Chat Area */}
+      <main className="flex-1 overflow-hidden">
+        <div className="max-w-4xl mx-auto h-full flex flex-col">
+          <div className="flex-1 overflow-hidden">
+            <ChatContainerRoot className="h-full">
+              <ChatContainerContent className="px-4 py-6">
+                {messages.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-full text-center space-y-8">
+                    <div className="w-16 h-16 bg-muted rounded-lg flex items-center justify-center">
+                      <Bot className="w-8 h-8 text-muted-foreground" />
+                    </div>
+                    
+                    <div className="space-y-3 max-w-md">
+                      <h2 className="text-xl font-semibold tracking-tight">
+                        Ready to assist
+                      </h2>
+                      <p className="text-muted-foreground text-sm leading-relaxed">
+                        I can help you manage your Google Calendar, Gmail, and Tasks. 
+                        Ask me anything about your workspace.
+                      </p>
+                    </div>
+
+                    <div className="grid gap-2 w-full max-w-sm text-sm">
+                      <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                        Try asking:
                       </div>
-                    </MessageContent>
-                  </Message>
+                      <div className="space-y-1 text-muted-foreground">
+                        <div>• Schedule a meeting tomorrow at 2 PM</div>
+                        <div>• What meetings do I have today?</div>
+                        <div>• Create a task to review proposals</div>
+                        <div>• Send an email to the team</div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-6">
+                    {messages.map((message) => (
+                      <Message key={message.id}>
+                        <MessageAvatar
+                          src=""
+                          alt={message.role === 'user' ? 'You' : 'Rituo'}
+                          fallback={message.role === 'user' ? 'U' : 'R'}
+                        />
+                        <MessageContent
+                          markdown={message.role === 'assistant'}
+                          className={
+                            message.role === 'user' 
+                              ? 'bg-foreground text-background' 
+                              : 'bg-muted'
+                          }
+                        >
+                          {message.content}
+                        </MessageContent>
+                      </Message>
+                    ))}
+                    
+                    {isLoading && (
+                      <Message>
+                        <MessageAvatar
+                          src=""
+                          alt="Rituo"
+                          fallback="R"
+                        />
+                        <MessageContent markdown={false} className="bg-muted">
+                          Thinking...
+                        </MessageContent>
+                      </Message>
+                    )}
+                  </div>
                 )}
+                <ChatContainerScrollAnchor />
+              </ChatContainerContent>
+            </ChatContainerRoot>
+          </div>
+
+          {/* Input Area - Swiss Design: Functional, clean lines */}
+          <div className="border-t border-border bg-background/80 backdrop-blur-sm">
+            <div className="px-4 py-4">
+              <PromptInput
+                value={input}
+                onValueChange={setInput}
+                isLoading={isLoading}
+                onSubmit={sendMessage}
+                className="w-full"
+              >
+                <PromptInputTextarea
+                  placeholder="Ask me to schedule meetings, check calendar, manage tasks..."
+                  className="min-h-[52px] resize-none border-0 shadow-none focus-visible:ring-0 text-sm"
+                />
+                <PromptInputActions className="p-2">
+                                      <PromptInputAction tooltip="Send message">
+                      <SwissButton
+                        size="sm"
+                        onClick={sendMessage}
+                        disabled={!input.trim() || isLoading || !hasApiKey}
+                        className="h-8 w-8 p-0 rounded-sm"
+                      >
+                        <Send className="w-4 h-4" />
+                      </SwissButton>
+                    </PromptInputAction>
+                </PromptInputActions>
+              </PromptInput>
+            </div>
+            
+            {!hasApiKey && (
+              <div className="px-4 pb-4">
+                <div className="text-xs text-muted-foreground text-center">
+                                  <SwissButton
+                  variant="link"
+                  size="sm"
+                  onClick={() => setShowApiKeySetup(true)}
+                  className="text-xs h-auto p-0 text-muted-foreground hover:text-foreground"
+                >
+                  Add API key to start chatting
+                </SwissButton>
+                </div>
               </div>
             )}
-            <ChatContainerScrollAnchor />
-          </ChatContainerContent>
-        </ChatContainerRoot>
-      </div>
-
-      {/* Input Area */}
-      <div className="border-t p-4">
-        <PromptInput
-          value={input}
-          onValueChange={setInput}
-          isLoading={isLoading}
-          onSubmit={sendMessage}
-          className="w-full"
-        >
-          <PromptInputTextarea
-            placeholder="Ask me to schedule a meeting, check your calendar, or manage tasks..."
-            className="min-h-[60px]"
-          />
-          <PromptInputActions className="p-2">
-            <PromptInputAction tooltip="Send message">
-              <Button
-                size="sm"
-                onClick={sendMessage}
-                disabled={!input.trim() || isLoading}
-                className="rounded-2xl"
-              >
-                <Send size={16} />
-              </Button>
-            </PromptInputAction>
-          </PromptInputActions>
-        </PromptInput>
-      </div>
-
-      {/* Debug Info */}
-      {process.env.NODE_ENV === 'development' && (
-        <div className="border-t p-2 text-xs text-muted-foreground">
-          <details>
-            <summary>Debug Info</summary>
-            <pre className="mt-2 text-xs">
-              {JSON.stringify({ chatId, messagesCount: messages.length, isLoading }, null, 2)}
-            </pre>
-          </details>
+          </div>
         </div>
-      )}
+      </main>
     </div>
   )
 }

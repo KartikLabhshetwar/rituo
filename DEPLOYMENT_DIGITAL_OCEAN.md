@@ -8,7 +8,7 @@ This guide will help you deploy the Rituo backend to Digital Ocean while keeping
 2. **Domain Name** (optional but recommended for production)
 3. **Google Cloud Console** access for OAuth configuration
 4. **MongoDB Atlas** account (or self-hosted MongoDB)
-5. **Groq API Key** for AI functionality
+5. ✨ **NO GROQ API KEY NEEDED** - Users provide their own keys (BYOK)
 
 ## 🛠️ Step 1: Prepare Your Digital Ocean Droplet
 

@@ -1,44 +1,86 @@
 "use client"
 
-import { useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
+import { Navigation } from "@/components/landing/navigation"
+import { HeroSection } from "@/components/landing/hero-section"
+import { FeaturesSection } from "@/components/landing/features-section"
+import { BenefitsSection } from "@/components/landing/benefits-section"
+import { StatsSection } from "@/components/landing/stats-section"
+import { CTASection } from "@/components/landing/cta-section"
+import { Footer } from "@/components/landing/footer"
 
-export default function Home() {
+export default function LandingPage() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
   const router = useRouter()
 
   useEffect(() => {
-    // Check if user is authenticated
-    const checkAuth = async () => {
-      try {
-        const response = await fetch('http://localhost:8000/api/auth/check', {
-          credentials: 'include'
-        })
-        
-        if (response.ok) {
-          const data = await response.json()
-          if (data.authenticated) {
-            router.push('/chat')
-          } else {
-            router.push('/login')
-          }
-        } else {
-          router.push('/login')
-        }
-      } catch (error) {
-        console.error('Auth check failed:', error)
-        router.push('/login')
-      }
+    // Check if user is already authenticated
+    const token = localStorage.getItem('access_token')
+    const apiKey = localStorage.getItem('groq_api_key')
+    
+    if (token && apiKey) {
+      // User is fully set up, redirect to chat
+      router.push('/chat')
+      return
     }
-
-    checkAuth()
+    
+    if (token) {
+      // User is authenticated but needs API key
+      setIsAuthenticated(true)
+    }
+    
+    setIsLoading(false)
   }, [router])
 
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100">
-      <div className="text-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 mx-auto"></div>
-        <p className="mt-4 text-gray-600">Loading Rituo...</p>
+    const handleGetStarted = () => {
+    if (isAuthenticated) {
+      // User is authenticated, go to API key setup
+      router.push('/chat')
+    } else {
+      // User needs to authenticate first
+      router.push('/login')
+    }
+  }
+
+  const handleSignIn = () => {
+    router.push('/login')
+  }
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-foreground border-t-transparent rounded-full animate-spin" />
       </div>
+    )
+  }
+
+  return (
+    <div className="min-h-screen bg-background">
+      <Navigation 
+        isAuthenticated={isAuthenticated}
+        onSignIn={handleSignIn}
+        onGetStarted={handleGetStarted}
+      />
+      
+      <HeroSection 
+        isAuthenticated={isAuthenticated}
+        onGetStarted={handleGetStarted}
+      />
+      
+      <FeaturesSection />
+      
+      <BenefitsSection />
+      
+      <StatsSection />
+      
+      <CTASection 
+        isAuthenticated={isAuthenticated}
+        onGetStarted={handleGetStarted}
+      />
+      
+      <Footer />
     </div>
   )
 }

@@ -120,9 +120,11 @@ deploy_application() {
         exit 1
     fi
     
+    # GROQ_API_KEY is optional with BYOK (Bring Your Own Key) implementation
     if [[ -z "$GROQ_API_KEY" ]]; then
-        print_error "GROQ_API_KEY is not set in .env.production"
-        exit 1
+        print_warning "GROQ_API_KEY not set - using BYOK (users provide their own keys)"
+    else
+        print_info "GROQ_API_KEY found - will be used as fallback"
     fi
     
     print_success "Environment validation completed"

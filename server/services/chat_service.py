@@ -46,6 +46,35 @@ class ChatService:
                 detail="Failed to create chat session"
             )
 
+    async def create_chat_session_with_custom_id(self, user_id: str, custom_id: str, title: str = "New Chat") -> ChatSession:
+        """Create a new chat session with a custom ID"""
+        try:
+            db = get_database()
+            
+            chat_data = {
+                "custom_id": custom_id,  # Store the custom ID
+                "user_id": user_id,  # Keep as string, don't convert to ObjectId
+                "title": title,
+                "messages": [],
+                "created_at": datetime.now(timezone.utc),
+                "updated_at": datetime.now(timezone.utc),
+                "is_active": True,
+                "metadata": {}
+            }
+            
+            result = await db.chat_sessions.insert_one(chat_data)
+            chat_data["_id"] = str(result.inserted_id)  # Convert ObjectId to string
+            
+            logger.info(f"Created new chat session with custom ID {custom_id} for user {user_id}: {result.inserted_id}")
+            return ChatSession(**chat_data)
+            
+        except Exception as e:
+            logger.error(f"Error creating chat session with custom ID {custom_id} for user {user_id}: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create chat session"
+            )
+
     async def get_user_chat_sessions(self, user_id: str, limit: int = 50) -> List[ChatSessionResponse]:
         """Get all chat sessions for a user"""
         try:
@@ -87,14 +116,32 @@ class ChatService:
         try:
             db = get_database()
             
-            session_data = await db.chat_sessions.find_one({
-                "_id": ObjectId(session_id),
-                "$or": [
-                    {"user_id": user_id},  # String format (new)
-                    {"user_id": ObjectId(user_id)}  # ObjectId format (legacy)
-                ],
-                "is_active": True
-            })
+            session_data = None
+            
+            # Try to find by ObjectId first
+            try:
+                if ObjectId.is_valid(session_id):
+                    session_data = await db.chat_sessions.find_one({
+                        "_id": ObjectId(session_id),
+                        "$or": [
+                            {"user_id": user_id},  # String format (new)
+                            {"user_id": ObjectId(user_id)}  # ObjectId format (legacy)
+                        ],
+                        "is_active": True
+                    })
+            except:
+                pass
+            
+            # If not found by ObjectId, try by custom_id
+            if not session_data:
+                session_data = await db.chat_sessions.find_one({
+                    "custom_id": session_id,
+                    "$or": [
+                        {"user_id": user_id},  # String format (new)
+                        {"user_id": ObjectId(user_id)}  # ObjectId format (legacy)
+                    ],
+                    "is_active": True
+                })
             
             if not session_data:
                 return None
@@ -126,21 +173,48 @@ class ChatService:
         try:
             db = get_database()
             
-            # Verify session exists and belongs to user
-            session = await db.chat_sessions.find_one({
-                "_id": ObjectId(session_id),
-                "$or": [
-                    {"user_id": user_id},  # String format (new)
-                    {"user_id": ObjectId(user_id)}  # ObjectId format (legacy)
-                ],
-                "is_active": True
-            })
+            # Try to find existing session by ObjectId first, then by custom ID
+            session = None
             
+            # Check if session_id is a valid ObjectId
+            try:
+                if ObjectId.is_valid(session_id):
+                    session = await db.chat_sessions.find_one({
+                        "_id": ObjectId(session_id),
+                        "$or": [
+                            {"user_id": user_id},  # String format (new)
+                            {"user_id": ObjectId(user_id)}  # ObjectId format (legacy)
+                        ],
+                        "is_active": True
+                    })
+            except:
+                pass
+            
+            # If not found by ObjectId, try to find by custom ID field
             if not session:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Chat session not found"
-                )
+                session = await db.chat_sessions.find_one({
+                    "custom_id": session_id,
+                    "$or": [
+                        {"user_id": user_id},  # String format (new)
+                        {"user_id": ObjectId(user_id)}  # ObjectId format (legacy)
+                    ],
+                    "is_active": True
+                })
+            
+            # If still not found, create a new session with the custom ID
+            if not session:
+                logger.info(f"Creating new chat session with custom ID: {session_id}")
+                new_session = await self.create_chat_session_with_custom_id(user_id, session_id, "New Chat")
+                session = {
+                    "_id": ObjectId(new_session.id),
+                    "custom_id": session_id,
+                    "user_id": user_id,
+                    "title": "New Chat",
+                    "messages": [],
+                    "created_at": new_session.created_at,
+                    "updated_at": new_session.updated_at,
+                    "is_active": True
+                }
             
             # Create new message
             message = ChatMessage(
@@ -150,9 +224,10 @@ class ChatService:
                 metadata={}
             )
             
-            # Add message to session
+            # Add message to session using the correct identifier
+            update_filter = {"_id": session["_id"]}
             await db.chat_sessions.update_one(
-                {"_id": ObjectId(session_id)},
+                update_filter,
                 {
                     "$push": {"messages": message.model_dump()},
                     "$set": {"updated_at": datetime.now(timezone.utc)}

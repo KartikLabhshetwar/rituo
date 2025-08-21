@@ -1,9 +1,9 @@
 "use client"
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 
-export default function OAuthSuccess() {
+function OAuthSuccessContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [status, setStatus] = useState<'processing' | 'success' | 'error'>('processing')
@@ -13,7 +13,7 @@ export default function OAuthSuccess() {
     const handleOAuthCallback = async () => {
       const code = searchParams.get('code')
       const tempToken = searchParams.get('temp_token')
-      const user = searchParams.get('user')
+      // const user = searchParams.get('user') // Commented out unused variable
       const error = searchParams.get('error')
       const state = searchParams.get('state')
 
@@ -169,5 +169,20 @@ export default function OAuthSuccess() {
         )}
       </div>
     </div>
+  )
+}
+
+export default function OAuthSuccess() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100">
+        <div className="max-w-md w-full space-y-8 p-8 text-center bg-white rounded-lg shadow-lg">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <h2 className="text-xl font-semibold text-gray-900">Loading...</h2>
+        </div>
+      </div>
+    }>
+      <OAuthSuccessContent />
+    </Suspense>
   )
 }

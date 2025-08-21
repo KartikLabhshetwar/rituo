@@ -12,20 +12,20 @@ logger = logging.getLogger(__name__)
 
 class AIService:
     def __init__(self):
-        self.groq_api_key = os.getenv("GROQ_API_KEY")
-        if not self.groq_api_key:
-            logger.error("GROQ_API_KEY not found in environment variables")
-            raise ValueError("GROQ_API_KEY is required")
+        self.groq_api_key = os.getenv("GROQ_API_KEY")  # Optional fallback
+        self.client = None  # Will be initialized per request with user's key
+        self.model_name = "llama-3.1-8b-instant"  # Using a reliable Groq model
         
-        # Initialize Groq model
-        try:
-            from groq import Groq
-            self.client = Groq(api_key=self.groq_api_key)
-            self.model_name = "llama-3.1-8b-instant"  # Using a reliable Groq model
-            logger.info("Successfully initialized Groq client")
-        except Exception as e:
-            logger.error(f"Failed to initialize Groq client: {e}")
-            raise
+        # Initialize fallback client if environment key exists
+        if self.groq_api_key:
+            try:
+                from groq import Groq
+                self.client = Groq(api_key=self.groq_api_key)
+                logger.info("Successfully initialized fallback Groq client")
+            except Exception as e:
+                logger.warning(f"Failed to initialize fallback Groq client: {e}")
+        else:
+            logger.info("No fallback GROQ_API_KEY found - will use user-provided keys only")
     
     def create_system_prompt(self, user: User) -> str:
         """Create system prompt for the AI assistant"""
@@ -63,12 +63,22 @@ Response: "I've sent your email to john@company.com successfully."""
         user_message: str, 
         user: User,
         chat_history: List[Dict[str, Any]] = None,
-        context: Dict[str, Any] = None
+        context: Dict[str, Any] = None,
+        groq_api_key: str = None
     ) -> str:
         """
         Process a user message and return AI response
         """
         try:
+            # Use user's API key if provided, otherwise fall back to environment
+            api_key = groq_api_key or self.groq_api_key
+            if not api_key:
+                raise ValueError("No Groq API key available. Please provide your API key.")
+            
+            # Create Groq client with user's API key
+            from groq import Groq
+            client = Groq(api_key=api_key)
+            
             # Create system prompt
             system_prompt = self.create_system_prompt(user)
             
@@ -87,7 +97,7 @@ Response: "I've sent your email to john@company.com successfully."""
             messages.append(HumanMessage(content=user_message))
             
             # Get response from Groq
-            response = await self._get_ai_response(messages)
+            response = await self._get_ai_response(messages, client)
             
             # Check if the response indicates need for MCP tools
             enhanced_response = await self._process_with_mcp_tools(
@@ -100,7 +110,7 @@ Response: "I've sent your email to john@company.com successfully."""
             logger.error(f"Error processing message: {e}")
             return "I apologize, but I encountered an error while processing your message. Please try again."
     
-    async def _get_ai_response(self, messages: List[Any]) -> str:
+    async def _get_ai_response(self, messages: List[Any], client = None) -> str:
         """Get response from Groq model"""
         try:
             # Convert messages to Groq format
@@ -113,8 +123,11 @@ Response: "I've sent your email to john@company.com successfully."""
                 elif isinstance(msg, AIMessage):
                     groq_messages.append({"role": "assistant", "content": msg.content})
             
+            # Use provided client or fall back to instance client
+            groq_client = client or self.client
+            
             # Call Groq API
-            response = self.client.chat.completions.create(
+            response = groq_client.chat.completions.create(
                 model=self.model_name,
                 messages=groq_messages,
                 max_tokens=1000,

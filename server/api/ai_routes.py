@@ -2,7 +2,7 @@
 Chat endpoint for AI interaction
 """
 import logging
-from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi import APIRouter, HTTPException, status, Depends, Header
 from pydantic import BaseModel
 from auth.dependencies import get_current_user
 from database.models import User
@@ -28,7 +28,8 @@ class ChatResponse(BaseModel):
 @router.post("/chat", response_model=ChatResponse)
 async def chat_with_ai(
     request: ChatRequest,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    x_groq_api_key: str = Header(None, alias="X-Groq-API-Key")
 ):
     """
     Chat with AI and get response using MCP tools
@@ -66,12 +67,20 @@ async def chat_with_ai(
                 for msg in chat_session.messages[:-1]  # Exclude the just-added user message
             ]
         
-        # Process with AI service (Groq + LangChain)
+        # Check if user provided their own Groq API key
+        if not x_groq_api_key:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Groq API key is required. Please add your API key in the settings."
+            )
+        
+        # Process with AI service (Groq + LangChain) using user's API key
         ai_response_content = await ai_service.process_message(
             user_message=request.message,
             user=current_user,
             chat_history=chat_history,
-            context=request.context
+            context=request.context,
+            groq_api_key=x_groq_api_key
         )
         
         # Add AI response to chat

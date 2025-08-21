@@ -4,7 +4,16 @@ import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 
 export default function Debug() {
-  const [debugInfo, setDebugInfo] = useState<any>({})
+  const [debugInfo, setDebugInfo] = useState<{
+    location?: string;
+    origin?: string;
+    userAgent?: string;
+    localStorage?: {
+      access_token: boolean;
+      refresh_token: boolean;
+      user: boolean;
+    };
+  }>({})
   const [backendHealth, setBackendHealth] = useState<string>('checking...')
 
   useEffect(() => {
@@ -25,14 +34,14 @@ export default function Debug() {
     fetch('http://localhost:8000/health')
       .then(res => res.json())
       .then(data => setBackendHealth('✅ Connected: ' + JSON.stringify(data)))
-      .catch(err => setBackendHealth('❌ Failed: ' + err.message))
+      .catch(err => setBackendHealth('❌ Failed: ' + (err instanceof Error ? err.message : String(err))))
   }, [])
 
   const testGoogleScript = () => {
     console.log('Google script test:', {
       googleAvailable: !!window.google,
-      googleAccounts: !!(window as any).google?.accounts,
-      googleId: !!(window as any).google?.accounts?.id,
+      googleAccounts: !!(window as unknown as { google?: { accounts?: unknown } }).google?.accounts,
+      googleId: !!(window as unknown as { google?: { accounts?: { id?: unknown } } }).google?.accounts?.id,
     })
   }
 
@@ -51,7 +60,7 @@ export default function Debug() {
       const data = await response.json()
       alert('Auth check: ' + JSON.stringify(data, null, 2))
     } catch (err) {
-      alert('Auth check failed: ' + err.message)
+      alert('Auth check failed: ' + (err instanceof Error ? err.message : String(err)))
     }
   }
 
@@ -96,7 +105,7 @@ export default function Debug() {
               <li>http://127.0.0.1:3000</li>
             </ul>
             <div className="mt-4">
-              <strong>Steps to fix "Can't continue with google.com" error:</strong>
+              <strong>Steps to fix &quot;Can&apos;t continue with google.com&quot; error:</strong>
               <ol className="list-decimal list-inside ml-4 space-y-1">
                 <li>Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank" className="text-blue-600 underline">Google Cloud Console</a></li>
                 <li>Select your OAuth client</li>
