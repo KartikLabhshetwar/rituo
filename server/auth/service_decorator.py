@@ -311,6 +311,10 @@ def require_google_service(
                         # The downstream get_authenticated_google_service_oauth21 will handle
                         # whether the user's token is valid for the requested resource.
                         # This decorator should not block the call here.
+                        # In internal mode, allow recent auth for same-process MCP calls
+                        import os
+                        internal_mode = os.getenv("MCP_INTERNAL_MODE", "false").lower() == "true"
+                        
                         service, actual_user_email = await get_authenticated_google_service_oauth21(
                             service_name=service_name,
                             version=service_version,
@@ -319,7 +323,7 @@ def require_google_service(
                             required_scopes=resolved_scopes,
                             session_id=mcp_session_id,
                             auth_token_email=authenticated_user,
-                            allow_recent_auth=False,
+                            allow_recent_auth=internal_mode,
                         )
                     else:
                         # If OAuth 2.1 is not enabled, always use the legacy authentication method.
@@ -438,6 +442,10 @@ def require_multiple_services(service_configs: List[Dict[str, Any]]):
 
                     if is_oauth21_enabled():
                         logger.debug(f"[{tool_name}] Attempting OAuth 2.1 authentication flow for {service_type}.")
+                        # In internal mode, allow recent auth for same-process MCP calls
+                        import os
+                        internal_mode = os.getenv("MCP_INTERNAL_MODE", "false").lower() == "true"
+                        
                         service, _ = await get_authenticated_google_service_oauth21(
                             service_name=service_name,
                             version=service_version,
@@ -446,7 +454,7 @@ def require_multiple_services(service_configs: List[Dict[str, Any]]):
                             required_scopes=resolved_scopes,
                             session_id=mcp_session_id,
                             auth_token_email=authenticated_user,
-                            allow_recent_auth=False,
+                            allow_recent_auth=internal_mode,
                         )
                     else:
                         # If OAuth 2.1 is not enabled, always use the legacy authentication method.

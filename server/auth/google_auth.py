@@ -215,8 +215,11 @@ def load_credentials_from_file(
             client_id=creds_data.get("client_id"),
             client_secret=creds_data.get("client_secret"),
             scopes=creds_data.get("scopes"),
-            expiry=expiry,
         )
+        
+        # Set expiry separately if available (newer google-auth library compatibility)
+        if expiry:
+            credentials.expiry = expiry
         logger.debug(
             f"Credentials loaded for user {user_google_email} from {creds_path}"
         )

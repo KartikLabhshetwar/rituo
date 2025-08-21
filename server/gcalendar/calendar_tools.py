@@ -335,6 +335,12 @@ async def create_event(
     if attachments and isinstance(attachments, str):
         attachments = [a.strip() for a in attachments.split(',') if a.strip()]
         logger.info(f"[create_event] Parsed attachments list from string: {attachments}")
+    # Default timezone to UTC if not provided and we have dateTime events
+    effective_timezone = timezone
+    if not effective_timezone and ("T" in start_time or "T" in end_time):
+        effective_timezone = "UTC"
+        logger.info(f"[create_event] No timezone provided, defaulting to UTC")
+    
     event_body: Dict[str, Any] = {
         "summary": summary,
         "start": (
@@ -350,11 +356,14 @@ async def create_event(
         event_body["location"] = location
     if description:
         event_body["description"] = description
-    if timezone:
+    
+    # Apply timezone to dateTime events
+    if effective_timezone:
         if "dateTime" in event_body["start"]:
-            event_body["start"]["timeZone"] = timezone
+            event_body["start"]["timeZone"] = effective_timezone
         if "dateTime" in event_body["end"]:
-            event_body["end"]["timeZone"] = timezone
+            event_body["end"]["timeZone"] = effective_timezone
+        logger.info(f"[create_event] Applied timezone '{effective_timezone}' to event")
     if attendees:
         event_body["attendees"] = [{"email": email} for email in attendees]
 
@@ -507,6 +516,12 @@ async def modify_event(
         f"[modify_event] Invoked. Email: '{user_google_email}', Event ID: {event_id}"
     )
 
+    # Default timezone to UTC if not provided and we have dateTime events  
+    effective_timezone = timezone
+    if not effective_timezone and ((start_time and "T" in start_time) or (end_time and "T" in end_time)):
+        effective_timezone = "UTC"
+        logger.info(f"[modify_event] No timezone provided, defaulting to UTC")
+    
     # Build the event body with only the fields that are provided
     event_body: Dict[str, Any] = {}
     if summary is not None:
@@ -517,14 +532,14 @@ async def modify_event(
             if "T" not in start_time
             else {"dateTime": start_time}
         )
-        if timezone is not None and "dateTime" in event_body["start"]:
-            event_body["start"]["timeZone"] = timezone
+        if effective_timezone and "dateTime" in event_body["start"]:
+            event_body["start"]["timeZone"] = effective_timezone
     if end_time is not None:
         event_body["end"] = (
             {"date": end_time} if "T" not in end_time else {"dateTime": end_time}
         )
-        if timezone is not None and "dateTime" in event_body["end"]:
-            event_body["end"]["timeZone"] = timezone
+        if effective_timezone and "dateTime" in event_body["end"]:
+            event_body["end"]["timeZone"] = effective_timezone
     if description is not None:
         event_body["description"] = description
     if location is not None:

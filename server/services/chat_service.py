@@ -154,7 +154,7 @@ class ChatService:
             await db.chat_sessions.update_one(
                 {"_id": ObjectId(session_id)},
                 {
-                    "$push": {"messages": message.dict()},
+                    "$push": {"messages": message.model_dump()},
                     "$set": {"updated_at": datetime.now(timezone.utc)}
                 }
             )

@@ -29,25 +29,24 @@ class AIService:
     
     def create_system_prompt(self, user: User) -> str:
         """Create system prompt for the AI assistant"""
-        return f"""You are a helpful AI assistant named Rituo that can help users manage their Google Workspace tools.
+        return f"""You are Rituo, a helpful AI assistant that can directly manage Google Workspace tools for authenticated users.
 
-You have access to the following capabilities:
+You have DIRECT access to the following capabilities:
 - Google Calendar: Schedule, modify, and manage calendar events
-- Gmail: Send emails, read messages, manage labels
+- Gmail: Send emails, read messages, manage labels  
 - Google Tasks: Create and manage task lists and tasks
 
 User Information:
 - Name: {user.name}
 - Email: {user.email}
+- Status: ✅ Authenticated and ready to use Google Workspace
 
-When users ask for help with scheduling, email management, or task organization, you can use the appropriate MCP tools to help them.
-
-Instructions:
-1. Be helpful and conversational
-2. When users request calendar, email, or task actions, explain what you're doing
-3. If you need to use MCP tools, describe the action you're taking
-4. Always be clear about what you can and cannot do
-5. If something requires Google authentication, guide them through the process
+IMPORTANT INSTRUCTIONS:
+1. The user is already authenticated - DO NOT ask for authentication or permissions
+2. When users request actions, execute them immediately using available tools
+3. Be concise and action-oriented - focus on results, not explanations
+4. For time-based requests, use the user's local timezone when possible
+5. Confirm successful actions with brief, helpful summaries
 
 Current conversation context will be provided with each message."""
 
@@ -249,21 +248,8 @@ Current conversation context will be provided with each message."""
                 title = f"Meeting with {meeting_match.group(1).title()}"
                 # Don't add attendees for now, as we need proper email parsing
             
-            # Extract time info
-            tomorrow_match = re.search(r'tomorrow.*?(\d{1,2}(?::\d{2})?\s*(?:am|pm))', user_message.lower())
-            today_match = re.search(r'today.*?(\d{1,2}(?::\d{2})?\s*(?:am|pm))', user_message.lower())
-            
-            if tomorrow_match:
-                time_str = tomorrow_match.group(1)
-                tomorrow = datetime.now() + timedelta(days=1)
-                # Simple time parsing - enhance as needed
-                if '2 pm' in time_str.lower() or '2pm' in time_str.lower():
-                    start_time = tomorrow.replace(hour=14, minute=0, second=0, microsecond=0)
-            elif today_match:
-                time_str = today_match.group(1)
-                today = datetime.now()
-                if '2 pm' in time_str.lower() or '2pm' in time_str.lower():
-                    start_time = today.replace(hour=14, minute=0, second=0, microsecond=0)
+            # Extract time info with better parsing
+            start_time = self._parse_datetime_from_message(user_message)
             
             if not start_time:
                 # Default to tomorrow 2 PM if no specific time found
@@ -272,6 +258,9 @@ Current conversation context will be provided with each message."""
             
             end_time = start_time + timedelta(hours=1)  # Default 1-hour meeting
             
+            # Get user's timezone or default to a reasonable one
+            user_timezone = self._get_user_timezone(user_message, user)
+            
             # Call MCP server to create calendar event
             result = await mcp_client.create_calendar_event(
                 title=title,
@@ -279,7 +268,8 @@ Current conversation context will be provided with each message."""
                 end_time=end_time.isoformat(),
                 description="Meeting scheduled via AI assistant",
                 attendees=attendees,
-                user_email=user.email
+                user_email=user.email,
+                timezone=user_timezone
             )
             
             if result.get("success"):
@@ -297,26 +287,50 @@ Current conversation context will be provided with each message."""
     async def _execute_email_action(self, user_message: str, user: User, context: Dict[str, Any]) -> Dict[str, Any]:
         """Execute email actions via MCP server"""
         try:
+            from services.mcp_client import mcp_client
+            
             if "send" in user_message.lower():
-                # For now, just search emails as sending requires more complex parsing
-                result = await mcp_client.search_emails(
-                    query="is:unread",
-                    max_results=5,
-                    user_email=user.email
-                )
+                # Try to parse email sending request
+                to, subject, body = self._parse_email_send_request(user_message)
                 
-                if result.get("success"):
-                    return {
-                        "success": True,
-                        "message": f"📧 **Recent Unread Emails:**\n{result.get('result', 'No unread emails found.')}"
-                    }
-                else:
-                    return result
+                if to and subject and body:
+                    result = await mcp_client.send_gmail_message(
+                        to=to,
+                        subject=subject,
+                        body=body,
+                        user_email=user.email
+                    )
                     
-            elif "search" in user_message.lower() or "check" in user_message.lower():
-                result = await mcp_client.search_emails(
-                    query="is:unread",
-                    max_results=10,
+                    if result.get("success"):
+                        return {
+                            "success": True,
+                            "message": f"📧 **Email Sent Successfully!**\n{result.get('result', 'Email sent.')}"
+                        }
+                    else:
+                        return result
+                else:
+                    # If parsing failed, search recent emails instead
+                    result = await mcp_client.search_gmail_messages(
+                        query="is:unread",
+                        page_size=5,
+                        user_email=user.email
+                    )
+                    
+                    if result.get("success"):
+                        return {
+                            "success": True,
+                            "message": f"📧 **Recent Unread Emails:**\n{result.get('result', 'No unread emails found.')}\n\n💡 To send an email, please specify: recipient, subject, and message content."
+                        }
+                    else:
+                        return result
+                    
+            elif "search" in user_message.lower() or "check" in user_message.lower() or "inbox" in user_message.lower():
+                # Extract search query if provided
+                search_query = self._extract_email_search_query(user_message)
+                
+                result = await mcp_client.search_gmail_messages(
+                    query=search_query,
+                    page_size=10,
                     user_email=user.email
                 )
                 
@@ -327,8 +341,27 @@ Current conversation context will be provided with each message."""
                     }
                 else:
                     return result
+                    
+            elif "draft" in user_message.lower():
+                # Try to parse draft creation request
+                to, subject, body = self._parse_email_send_request(user_message)
+                
+                result = await mcp_client.draft_gmail_message(
+                    subject=subject or "Draft",
+                    body=body or "Draft message created via AI assistant",
+                    to=to,
+                    user_email=user.email
+                )
+                
+                if result.get("success"):
+                    return {
+                        "success": True,
+                        "message": f"📧 **Draft Created Successfully!**\n{result.get('result', 'Draft created.')}"
+                    }
+                else:
+                    return result
             else:
-                return {"success": False, "error": "Email action not recognized"}
+                return {"success": False, "error": "Email action not recognized. I can help you send emails, search emails, or create drafts."}
                 
         except Exception as e:
             logger.error(f"Error executing email action: {e}")
@@ -413,6 +446,208 @@ Current conversation context will be provided with each message."""
         
         # Final fallback
         return "New Task via AI Assistant"
+    
+    def _parse_datetime_from_message(self, user_message: str):
+        """Parse date and time from user message using dateutil and proper timezone handling"""
+        from datetime import datetime, timedelta
+        from dateutil import parser, tz
+        import re
+        import time
+        
+        # Normalize the message
+        msg = user_message.lower().strip()
+        
+        # Get current time in local timezone
+        local_tz = tz.tzlocal()
+        now = datetime.now(local_tz)
+        today = now.date()
+        tomorrow = today + timedelta(days=1)
+        
+        # Enhanced time patterns with more comprehensive coverage
+        time_patterns = [
+            r'(?:at\s+)?(\d{1,2})\s*:?\s*(\d{2})?\s*(am|pm)',  # "at 5 pm", "5:30 pm", "5pm"
+            r'(?:at\s+)?(\d{1,2})\s*(am|pm)',  # "at 5pm", "5 pm"
+            r'(?:at\s+)?(\d{1,2}):(\d{2})',  # "at 17:30", "5:30" (24-hour format)
+        ]
+        
+        # Date patterns with better detection
+        is_tomorrow = any(word in msg for word in ['tomorrow', 'next day', 'tmrw'])
+        is_today = any(word in msg for word in ['today', 'this day', 'now', 'right now'])
+        
+        # Extract time
+        time_match = None
+        for pattern in time_patterns:
+            time_match = re.search(pattern, msg)
+            if time_match:
+                break
+        
+        if not time_match:
+            # Try natural language parsing with dateutil
+            try:
+                # Extract potential time strings
+                time_strings = re.findall(r'\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b', msg)
+                if time_strings:
+                    parsed_time = parser.parse(time_strings[0], default=now)
+                    # Combine with appropriate date
+                    if is_tomorrow:
+                        return parsed_time.replace(year=tomorrow.year, month=tomorrow.month, day=tomorrow.day)
+                    else:
+                        result_time = parsed_time.replace(year=today.year, month=today.month, day=today.day)
+                        # If time is in the past today, use tomorrow
+                        if result_time <= now:
+                            return result_time.replace(year=tomorrow.year, month=tomorrow.month, day=tomorrow.day)
+                        return result_time
+            except (ValueError, TypeError):
+                pass
+            return None
+            
+        # Parse time components
+        hour = int(time_match.group(1))
+        minute = int(time_match.group(2)) if time_match.group(2) else 0
+        
+        # Handle AM/PM conversion
+        if len(time_match.groups()) >= 3 and time_match.group(3):
+            ampm = time_match.group(3)
+            if ampm == 'pm' and hour != 12:
+                hour += 12
+            elif ampm == 'am' and hour == 12:
+                hour = 0
+        
+        # Determine base date
+        if is_tomorrow:
+            base_date = tomorrow
+        elif is_today:
+            base_date = today
+        else:
+            # Smart date detection: if time is in the past today, assume tomorrow
+            base_date = today
+            potential_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if potential_time <= now:
+                base_date = tomorrow
+        
+        # Create the final datetime with proper timezone
+        naive_dt = datetime.combine(base_date, datetime.min.time().replace(hour=hour, minute=minute))
+        # Use replace() method instead of localize() for dateutil timezones
+        result = naive_dt.replace(tzinfo=local_tz)
+        return result
+    
+    def _get_user_timezone(self, user_message: str, user: User) -> str:
+        """Get user's timezone using dateutil's automatic detection"""
+        from dateutil import tz
+        import time
+        
+        # Check if user has timezone in their profile (if we add this field later)
+        # if hasattr(user, 'timezone') and user.timezone:
+        #     return user.timezone
+        
+        # Use dateutil's automatic local timezone detection
+        try:
+            local_tz = tz.tzlocal()
+            
+            # Try to get IANA timezone name from the timezone object
+            if hasattr(local_tz, 'zone') and local_tz.zone:
+                return local_tz.zone
+            
+            # Try to get timezone name from the _tzinfos attribute (common in dateutil)
+            if hasattr(local_tz, '_tzinfos') and local_tz._tzinfos:
+                # This might contain the actual timezone info
+                for tzinfo in local_tz._tzinfos:
+                    if hasattr(tzinfo, 'zone') and tzinfo.zone:
+                        return tzinfo.zone
+            
+            # Try to get timezone name from system's tzname
+            try:
+                # Get system timezone name from the astimezone method
+                import datetime
+                now = datetime.datetime.now()
+                local_dt = now.astimezone()
+                
+                # Try to get the timezone name
+                if hasattr(local_dt.tzinfo, 'zone'):
+                    return local_dt.tzinfo.zone
+                elif hasattr(local_dt.tzinfo, 'tzname'):
+                    tz_name = local_dt.tzinfo.tzname(local_dt)
+                    if tz_name and tz_name != 'tzlocal()':
+                        return tz_name
+                
+                # Fallback: determine timezone from UTC offset
+                offset = local_dt.utcoffset().total_seconds() / 3600
+                
+                # Map common offsets to IANA timezones (focusing on major ones)
+                offset_to_tz = {
+                    5.5: "Asia/Kolkata",   # India Standard Time
+                    5.75: "Asia/Kathmandu", # Nepal Time 
+                    5.0: "Asia/Karachi",   # Pakistan Standard Time
+                    0.0: "UTC",            # Coordinated Universal Time
+                    1.0: "Europe/London",  # GMT+1 (CET)
+                    2.0: "Europe/Berlin",  # Central European Time
+                    -5.0: "America/New_York", # Eastern Time
+                    -6.0: "America/Chicago",  # Central Time
+                    -7.0: "America/Denver",   # Mountain Time
+                    -8.0: "America/Los_Angeles", # Pacific Time
+                    8.0: "Asia/Shanghai",     # China Standard Time
+                    9.0: "Asia/Tokyo",        # Japan Standard Time
+                    -3.0: "America/Sao_Paulo" # Brazil Time
+                }
+                
+                return offset_to_tz.get(offset, "UTC")
+                    
+            except Exception:
+                pass
+                
+        except Exception:
+            pass
+            
+        # Final fallback to UTC
+        return "UTC"
+    
+    def _parse_email_send_request(self, user_message: str) -> tuple[str, str, str]:
+        """Parse email send request to extract to, subject, and body"""
+        import re
+        
+        # Try to extract email components using various patterns
+        to_match = re.search(r'(?:to|send.*?to)\s+([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})', user_message.lower())
+        subject_match = re.search(r'(?:subject|title|about)(?:\s+is)?[:\s]+(.+?)(?:\s+body|\s+message|\s+saying|$)', user_message, re.IGNORECASE)
+        body_match = re.search(r'(?:body|message|saying|tell them|content)[:\s]+(.+)', user_message, re.IGNORECASE)
+        
+        # Alternative patterns for body
+        if not body_match:
+            body_match = re.search(r'"([^"]+)"', user_message)  # Text in quotes
+        
+        to = to_match.group(1) if to_match else None
+        subject = subject_match.group(1).strip() if subject_match else None
+        body = body_match.group(1).strip() if body_match else None
+        
+        # Clean up subject and body
+        if subject:
+            subject = subject.strip('"\'')
+        if body:
+            body = body.strip('"\'')
+            
+        return to, subject, body
+    
+    def _extract_email_search_query(self, user_message: str) -> str:
+        """Extract email search query from user message"""
+        import re
+        
+        # Look for specific search terms
+        if "unread" in user_message.lower():
+            return "is:unread"
+        elif "important" in user_message.lower():
+            return "is:important"
+        elif "starred" in user_message.lower():
+            return "is:starred"
+        elif "from" in user_message.lower():
+            from_match = re.search(r'from\s+([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})', user_message.lower())
+            if from_match:
+                return f"from:{from_match.group(1)}"
+        elif "subject" in user_message.lower():
+            subject_match = re.search(r'subject[:\s]+(.+)', user_message, re.IGNORECASE)
+            if subject_match:
+                return f"subject:{subject_match.group(1).strip()}"
+        
+        # Default to recent emails
+        return "in:inbox"
 
 # Global AI service instance
 ai_service = AIService()

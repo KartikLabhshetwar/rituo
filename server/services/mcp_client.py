@@ -26,8 +26,17 @@ class GoogleWorkspaceMCPClient:
     async def connect_to_server(self):
         """Connect to the Google Workspace MCP server using proper MCP protocol"""
         try:
-            # Create FastMCP client - no auth needed as we'll handle auth per-request
-            self.client = Client(self.server_url)
+            # In internal mode, connect without authentication since auth is disabled
+            internal_mode = os.getenv("MCP_INTERNAL_MODE", "true").lower() == "true"
+            
+            if internal_mode:
+                logger.info("🔧 Connecting to MCP server in internal mode (no auth required)")
+                self.client = Client(self.server_url)
+            else:
+                # For external mode, we'd need proper OAuth tokens
+                logger.info("🔐 Connecting to MCP server in external mode (auth required)")
+                # TODO: Implement proper OAuth token retrieval for external mode
+                self.client = Client(self.server_url)
             
             # Test connection with ping
             async with self.client:
@@ -41,12 +50,12 @@ class GoogleWorkspaceMCPClient:
                 ]
                 
                 self.connected = True
-                logger.info(f"Connected to MCP server at {self.server_url}")
-                logger.info(f"Available MCP tools: {[tool['name'] for tool in self.available_tools]}")
+                logger.info(f"✅ Connected to MCP server at {self.server_url}")
+                logger.info(f"📋 Available MCP tools: {[tool['name'] for tool in self.available_tools]}")
                 return True
                 
         except Exception as e:
-            logger.error(f"Failed to connect to MCP server: {e}")
+            logger.error(f"❌ Failed to connect to MCP server: {e}")
             self.connected = False
             return False
     
@@ -126,7 +135,8 @@ class GoogleWorkspaceMCPClient:
         }, user_email)
     
     async def create_calendar_event(self, title: str, start_time: str, end_time: str, 
-                                  description: str = "", attendees: List[str] = None, user_email: str = "") -> Dict[str, Any]:
+                                  description: str = "", attendees: List[str] = None, 
+                                  user_email: str = "", timezone: str = None) -> Dict[str, Any]:
         """Create a calendar event using MCP tools"""
         arguments = {
             "summary": title,
@@ -135,6 +145,8 @@ class GoogleWorkspaceMCPClient:
             "description": description,
             "attendees": attendees or []
         }
+        if timezone:
+            arguments["timezone"] = timezone
         return await self.call_tool_via_auth("create_event", arguments, user_email)
     
     async def send_email(self, to: List[str], subject: str, body: str, 
@@ -157,9 +169,35 @@ class GoogleWorkspaceMCPClient:
         }
         return await self.call_tool_via_auth("search_gmail_messages", arguments, user_email)
     
-    async def create_task(self, title: str, notes: str = "", due_date: str = None, user_email: str = "") -> Dict[str, Any]:
+    async def get_default_task_list(self, user_email: str = "") -> Dict[str, Any]:
+        """Get the user's default task list"""
+        return await self.call_tool_via_auth("list_task_lists", {"max_results": 1}, user_email)
+    
+    async def create_task(self, title: str, notes: str = "", due_date: str = None, task_list_id: str = None, user_email: str = "") -> Dict[str, Any]:
         """Create a task using MCP tools"""
+        # If no task_list_id provided, get the default one
+        if not task_list_id:
+            try:
+                task_lists_result = await self.get_default_task_list(user_email)
+                if task_lists_result.get("success") and "result" in task_lists_result:
+                    # Parse the result to extract the first task list ID
+                    result_text = task_lists_result["result"]
+                    # Look for ID pattern in the result
+                    import re
+                    id_match = re.search(r"ID:\s*([\w-]+)", result_text)
+                    if id_match:
+                        task_list_id = id_match.group(1)
+                    else:
+                        # Fallback to @default
+                        task_list_id = "@default"
+                else:
+                    task_list_id = "@default"
+            except Exception as e:
+                logger.warning(f"Failed to get default task list, using @default: {e}")
+                task_list_id = "@default"
+        
         arguments = {
+            "task_list_id": task_list_id,
             "title": title,
             "notes": notes,
             "due": due_date
@@ -173,6 +211,116 @@ class GoogleWorkspaceMCPClient:
             "max_results": max_results
         }
         return await self.call_tool_via_auth("list_tasks", arguments, user_email)
+    
+    # Gmail Methods
+    async def search_gmail_messages(self, query: str, page_size: int = 10, user_email: str = "") -> Dict[str, Any]:
+        """Search Gmail messages using MCP tools"""
+        arguments = {
+            "query": query,
+            "page_size": page_size
+        }
+        return await self.call_tool_via_auth("search_gmail_messages", arguments, user_email)
+    
+    async def get_gmail_message_content(self, message_id: str, user_email: str = "") -> Dict[str, Any]:
+        """Get Gmail message content using MCP tools"""
+        arguments = {
+            "message_id": message_id
+        }
+        return await self.call_tool_via_auth("get_gmail_message_content", arguments, user_email)
+    
+    async def get_gmail_messages_content_batch(self, message_ids: List[str], format: str = "full", user_email: str = "") -> Dict[str, Any]:
+        """Get batch Gmail messages content using MCP tools"""
+        arguments = {
+            "message_ids": message_ids,
+            "format": format
+        }
+        return await self.call_tool_via_auth("get_gmail_messages_content_batch", arguments, user_email)
+    
+    async def send_gmail_message(self, to: str, subject: str, body: str, cc: str = None, bcc: str = None, 
+                                thread_id: str = None, in_reply_to: str = None, references: str = None, 
+                                user_email: str = "") -> Dict[str, Any]:
+        """Send Gmail message using MCP tools"""
+        arguments = {
+            "to": to,
+            "subject": subject,
+            "body": body
+        }
+        if cc:
+            arguments["cc"] = cc
+        if bcc:
+            arguments["bcc"] = bcc
+        if thread_id:
+            arguments["thread_id"] = thread_id
+        if in_reply_to:
+            arguments["in_reply_to"] = in_reply_to
+        if references:
+            arguments["references"] = references
+            
+        return await self.call_tool_via_auth("send_gmail_message", arguments, user_email)
+    
+    async def draft_gmail_message(self, subject: str, body: str, to: str = None, cc: str = None, bcc: str = None,
+                                 thread_id: str = None, in_reply_to: str = None, references: str = None,
+                                 user_email: str = "") -> Dict[str, Any]:
+        """Create Gmail draft using MCP tools"""
+        arguments = {
+            "subject": subject,
+            "body": body
+        }
+        if to:
+            arguments["to"] = to
+        if cc:
+            arguments["cc"] = cc
+        if bcc:
+            arguments["bcc"] = bcc
+        if thread_id:
+            arguments["thread_id"] = thread_id
+        if in_reply_to:
+            arguments["in_reply_to"] = in_reply_to
+        if references:
+            arguments["references"] = references
+            
+        return await self.call_tool_via_auth("draft_gmail_message", arguments, user_email)
+    
+    async def get_gmail_thread_content(self, thread_id: str, user_email: str = "") -> Dict[str, Any]:
+        """Get Gmail thread content using MCP tools"""
+        arguments = {
+            "thread_id": thread_id
+        }
+        return await self.call_tool_via_auth("get_gmail_thread_content", arguments, user_email)
+    
+    async def list_gmail_labels(self, user_email: str = "") -> Dict[str, Any]:
+        """List Gmail labels using MCP tools"""
+        arguments = {}
+        return await self.call_tool_via_auth("list_gmail_labels", arguments, user_email)
+    
+    async def manage_gmail_label(self, action: str, name: str = None, label_id: str = None, 
+                                label_list_visibility: str = "labelShow", message_list_visibility: str = "show",
+                                user_email: str = "") -> Dict[str, Any]:
+        """Manage Gmail labels using MCP tools"""
+        arguments = {
+            "action": action,
+            "label_list_visibility": label_list_visibility,
+            "message_list_visibility": message_list_visibility
+        }
+        if name:
+            arguments["name"] = name
+        if label_id:
+            arguments["label_id"] = label_id
+            
+        return await self.call_tool_via_auth("manage_gmail_label", arguments, user_email)
+    
+    async def modify_gmail_message_labels(self, message_id: str, add_label_ids: List[str] = None, 
+                                         remove_label_ids: List[str] = None, user_email: str = "") -> Dict[str, Any]:
+        """Modify Gmail message labels using MCP tools"""
+        arguments = {
+            "message_id": message_id
+        }
+        if add_label_ids:
+            arguments["add_label_ids"] = add_label_ids
+        if remove_label_ids:
+            arguments["remove_label_ids"] = remove_label_ids
+            
+        return await self.call_tool_via_auth("modify_gmail_message_labels", arguments, user_email)
 
 # Global MCP client instance
 mcp_client = GoogleWorkspaceMCPClient()

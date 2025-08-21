@@ -15,6 +15,10 @@ from fastapi.responses import JSONResponse
 # Load environment variables
 load_dotenv()
 
+# Set internal mode for MCP server when running in unified mode
+os.environ["MCP_INTERNAL_MODE"] = "true"
+os.environ["MCP_SERVICE_TOKEN"] = "internal-service-token"
+
 # Import database connection
 from database.connection import connect_to_mongo, close_mongo_connection
 
@@ -109,15 +113,33 @@ app = FastAPI(
 )
 
 # Configure CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
+def get_cors_origins():
+    """Get CORS origins based on environment"""
+    default_origins = [
         "http://localhost:3000",  # Next.js dev server
         "http://127.0.0.1:3000",
         "http://localhost:3001",  # Alternative port
         "http://127.0.0.1:3001",
         "https://accounts.google.com",  # Allow Google OAuth
-    ],
+    ]
+    
+    # Add production frontend URL if specified
+    frontend_url = os.getenv("FRONTEND_URL")
+    if frontend_url:
+        default_origins.append(frontend_url)
+    
+    # Add Vercel preview deployments pattern if in production
+    if os.getenv("ENVIRONMENT") == "production":
+        default_origins.extend([
+            "https://*.vercel.app",  # Vercel deployments
+            "https://rituo-*.vercel.app",  # Your app deployments
+        ])
+    
+    return default_origins
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=get_cors_origins(),
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],

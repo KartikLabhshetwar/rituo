@@ -116,14 +116,31 @@ def configure_server_for_http():
         return
 
     oauth21_enabled = os.getenv("MCP_ENABLE_OAUTH21", "false").lower() == "true"
+    internal_mode = os.getenv("MCP_INTERNAL_MODE", "true").lower() == "true"
 
+    # In internal mode, disable OAuth authentication for the MCP server to allow internal connections
+    # but still enable OAuth features for Google API access
+    if internal_mode:
+        logger.info("🔧 Internal mode enabled - disabling MCP server OAuth for internal connections")
+        server.auth = None
+        # Still enable OAuth21 integration for Google API access
+        if oauth21_enabled:
+            try:
+                from auth.oauth21_integration import enable_oauth21
+                enable_oauth21()
+                logger.info("✅ OAuth 2.1 integration enabled for Google API access")
+            except Exception as e:
+                logger.error(f"Failed to enable OAuth 2.1 integration: {e}")
+        return
+
+    # For external mode, enable full OAuth authentication
     if oauth21_enabled:
         if not os.getenv("GOOGLE_OAUTH_CLIENT_ID"):
             logger.warning("⚠️  OAuth 2.1 enabled but GOOGLE_OAUTH_CLIENT_ID not set")
             return
 
         if GOOGLE_REMOTE_AUTH_AVAILABLE:
-            logger.info("🔐 OAuth 2.1 enabled")
+            logger.info("🔐 OAuth 2.1 enabled for external connections")
             try:
                 _auth_provider = GoogleRemoteAuthProvider()
                 server.auth = _auth_provider

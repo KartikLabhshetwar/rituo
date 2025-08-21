@@ -252,8 +252,11 @@ class OAuth21SessionStore:
                     client_id=session_info.get("client_id"),
                     client_secret=session_info.get("client_secret"),
                     scopes=session_info.get("scopes", []),
-                    expiry=session_info.get("expiry"),
                 )
+                
+                # Set expiry separately if available (newer google-auth library compatibility)
+                if session_info.get("expiry"):
+                    credentials.expiry = session_info.get("expiry")
                 
                 logger.debug(f"Retrieved OAuth 2.1 credentials for {user_email}")
                 return credentials
@@ -341,16 +344,19 @@ class OAuth21SessionStore:
                     return self.get_credentials(requested_user_email)
             
             # Special case: Allow access if user has recently authenticated (for clients that don't send tokens)
-            # CRITICAL SECURITY: This is ONLY allowed in stdio mode, NEVER in OAuth 2.1 mode
+            # CRITICAL SECURITY: This is ONLY allowed in stdio mode OR internal mode, NEVER in external OAuth 2.1 mode
             if allow_recent_auth and requested_user_email in self._sessions:
-                # Check transport mode to ensure this is only used in stdio
+                # Check transport mode to ensure this is only used in stdio or internal mode
                 try:
                     from core.config import get_transport_mode
+                    import os
                     transport_mode = get_transport_mode()
-                    if transport_mode != "stdio":
+                    internal_mode = os.getenv("MCP_INTERNAL_MODE", "false").lower() == "true"
+                    
+                    if transport_mode != "stdio" and not internal_mode:
                         logger.error(
-                            f"SECURITY: Attempted to use allow_recent_auth in {transport_mode} mode. "
-                            f"This is only allowed in stdio mode!"
+                            f"SECURITY: Attempted to use allow_recent_auth in {transport_mode} mode (internal: {internal_mode}). "
+                            f"This is only allowed in stdio mode or internal mode!"
                         )
                         return None
                 except Exception as e:
@@ -359,14 +365,59 @@ class OAuth21SessionStore:
                 
                 logger.info(
                     f"Allowing credential access for {requested_user_email} based on recent authentication "
-                    f"(stdio mode only - client not sending bearer token)"
+                    f"(trusted mode - client not sending bearer token)"
                 )
                 return self.get_credentials(requested_user_email)
+            
+            # In internal mode, be more permissive for same-process MCP calls
+            try:
+                import os
+                internal_mode = os.getenv("MCP_INTERNAL_MODE", "false").lower() == "true"
+                if internal_mode:
+                    # Check if user has session in memory first
+                    if requested_user_email in self._sessions:
+                        logger.debug(f"Allowing credential access for {requested_user_email} in internal mode (in-memory session)")
+                        return self.get_credentials(requested_user_email)
+                    
+                    # If no in-memory session, try to load from persisted credentials
+                    persisted_creds = self._load_persisted_credentials(requested_user_email)
+                    if persisted_creds:
+                        logger.info(f"Allowing credential access for {requested_user_email} in internal mode (persisted credentials)")
+                        return persisted_creds
+            except Exception as e:
+                logger.error(f"Error checking internal mode: {e}")
             
             # No session or token info available - deny access for security
             logger.warning(
                 f"Credential access denied for {requested_user_email}: No valid session or token"
             )
+            return None
+    
+    def _load_persisted_credentials(self, user_email: str) -> Optional[Credentials]:
+        """
+        Load credentials from the persisted credential files.
+        This allows internal mode to access credentials even after server restart.
+        """
+        try:
+            from auth.google_auth import load_credentials_from_file
+            import os
+            
+            # Only in internal mode
+            internal_mode = os.getenv("MCP_INTERNAL_MODE", "false").lower() == "true"
+            if not internal_mode:
+                return None
+            
+            # Load credentials from the standard credential storage location
+            credentials = load_credentials_from_file(user_email)
+            if credentials:
+                logger.debug(f"Successfully loaded persisted credentials for {user_email}")
+                return credentials
+            else:
+                logger.debug(f"No persisted credentials found for {user_email}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error loading persisted credentials for {user_email}: {e}")
             return None
     
     def get_user_by_mcp_session(self, mcp_session_id: str) -> Optional[str]:
